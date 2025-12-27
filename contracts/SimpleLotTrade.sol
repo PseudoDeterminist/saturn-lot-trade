@@ -25,8 +25,8 @@ interface IERC20 {
 
 library PriceTicks {
     // Tick range: -464*4 .. +464*4
-    int16 private constant MIN_TICK = -2320;
-    int16 private constant MAX_TICK =  2320;
+    int256 private constant MIN_TICK = -2320;
+    int256 private constant MAX_TICK =  2320;
 
     // 464 uint16 values packed big-endian, 2 bytes each.
     // Total bytes = 928 (29*32)
@@ -97,26 +97,39 @@ library PriceTicks {
         hex"1c6f1c931cb81cdc1d011d261d4b1d701d961dbb1de11e071e2e1e541e7b1ea1"
         hex"1ec81ef01f171f3f1f661f8e1fb71fdf200820302059208320ac20d620ff2129"
         hex"2154217e21a921d421ff222a2256228122ad22d923062332235f238c23b923e7"
-        hex"241524432471249f24ce24fd252c255b258b25bb25eb261b264b267c26ad26de"
+        hex"241524432471249f24ce24fd252c255b258b25bb25eb261b264b267c26ad26de";
 
-    // Decade multipliers: 1e13 through 1e22
-    bytes internal constant DECADES = 
+    bytes internal constant DECADES =
+        hex"00000000000000000000000000000000000000000000000000000002540be400"  // 1e10
+        hex"000000000000000000000000000000000000000000000000000000174876e800"  // 1e11
+        hex"000000000000000000000000000000000000000000000000000000e8d4a51000"  // 1e12
         hex"000000000000000000000000000000000000000000000000000009184e72a000"  // 1e13
         hex"00000000000000000000000000000000000000000000000000005af3107a4000"  // 1e14
         hex"00000000000000000000000000000000000000000000000000038d7ea4c68000"  // 1e15
         hex"000000000000000000000000000000000000000000000000002386f26fc10000"  // 1e16
         hex"000000000000000000000000000000000000000000000000016345785d8a0000"  // 1e17
         hex"0000000000000000000000000000000000000000000000000de0b6b3a7640000"  // 1e18
-        hex"0000000000000000000000000000000000000000000000008ac7230489e80000"  // 1e19
-        hex"0000000000000000000000000000000000000000000000056bc75e2d63100000"  // 1e20
-        hex"00000000000000000000000000000000000000000000003635c9adc5dea00000"  // 1e21
-        hex"00000000000000000000000000000000000000000000021e19e0c9bab2400000"  // 1e22
-
-    function price(int16 tick) internal pure returns (uint256 m) {
-
-        uint256 i = uint256(r) * 2;
-        // uint16 big-endian
-        m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
+        hex"0000000000000000000000000000000000000000000000008ac7230489e80000"; // 1e19
+    
+    function price(int256 tick) internal pure returns (uint256 result) {
+        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
+    
+        uint256 t = uint256(tick - MIN_TICK); // safe because of require above
+        uint256 d = t / 464;                  // decade index
+        uint256 r = t % 464;                  // mantissa index
+    
+        uint256 i = r * 2;
+        uint256 m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
+    
+        // Copy DECADES to memory so we can reference it in assembly
+        bytes memory decadesData = DECADES;
+        uint256 factor;
+        assembly {
+            // decadesData pointer + 0x20 (skip length) + d*32 to pick the d-th 32-byte word
+            factor := mload(add(add(decadesData, 0x20), mul(d, 0x20)))
+        }
+    
+        result = factor * m;
     }
 }
 
@@ -126,10 +139,10 @@ contract SimpleLotTrade {
     IERC20 public immutable TETC;    // quote token (18 decimals)
     IERC20 public immutable TKN10K; // base token (0 decimals, integer lots)
 
-    int32 private constant NONE = type(int32).min;
+    int256 private constant NONE = type(int256).min;
 
     // Oracle
-    int32 public lastTradeTick;
+    int256 public lastTradeTick;
     uint256 public lastTradeBlock;
 
     // Reentrancy guard (token transfers)
@@ -143,8 +156,9 @@ contract SimpleLotTrade {
 
     struct Order {
         address owner;
-        int32 tick;
-        uint32 lotsRemaining;
+        int256 tick;
+        uint256 price;
+        uint256 lotsRemaining;
         bool isBuy;     // buy lots for TETC, or sell lots for TETC
         uint256 prev;
         uint256 next;
@@ -153,37 +167,37 @@ contract SimpleLotTrade {
 
     struct TickLevel {
         bool exists;
-        int32 prev;
-        int32 next;
+        int256 prev;
+        int256 next;
         uint256 head;
         uint256 tail;
-        uint32 orderCount;
-        uint32 totalLots;
+        uint256 orderCount;
+        uint256 totalLots;
     }
 
     uint256 public nextOrderId = 1;
 
     mapping(uint256 => Order) public orders;
-    mapping(int32 => TickLevel) public buyLevels;
-    mapping(int32 => TickLevel) public sellLevels;
+    mapping(int256 => TickLevel) public buyLevels;
+    mapping(int256 => TickLevel) public sellLevels;
 
     bool public hasBestBuy;
     bool public hasBestSell;
-    int32 public bestBuyTick;
-    int32 public bestSellTick;
+    int256 public bestBuyTick;
+    int256 public bestSellTick;
 
     // Book return structs
     struct BookOrder {
         uint256 id;
         address owner;
-        int32 tick;
-        uint32 lotsRemaining;
+        int256 tick;
+        uint256 lotsRemaining;
     }
 
     struct BookLevel {
-        int32 tick;
-        uint32 totalLots;
-        uint32 orderCount;
+        int256 tick;
+        uint256 totalLots;
+        uint256 orderCount;
     }
 
     constructor(address tetcToken, address strn10kToken) {
@@ -197,10 +211,10 @@ contract SimpleLotTrade {
 
     /* ---------- Maker Orders (escrow on placement) ---------- */
 
-    function placeBuy(int32 tick, uint32 lots) external nonReentrant returns (uint256 id) {
+    function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
         require(lots > 0, "zero lots");
 
-        uint256 price = _tetcPerLotFromTick(tick);
+        uint256 price = PriceTicks.price(tick);
         uint256 cost = uint256(lots) * price;
 
         // Escrow TETC in this contract
@@ -210,7 +224,7 @@ contract SimpleLotTrade {
         _enqueue(true, tick, id);
     }
 
-    function placeSell(int32 tick, uint32 lots) external nonReentrant returns (uint256 id) {
+    function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
         require(lots > 0, "zero lots");
 
         // Escrow TKN10K lots in this contract (integer token)
@@ -226,7 +240,7 @@ contract SimpleLotTrade {
 
         // Refund remaining escrow
         if (o.isBuy) {
-            uint256 refund = uint256(o.lotsRemaining) * _tetcPerLotFromTick(o.tick);
+            uint256 refund = uint256(o.lotsRemaining) * PriceTicks.price(o.tick);
             require(TETC.transfer(msg.sender, refund), "TETC refund failed");
             buyLevels[o.tick].totalLots -= o.lotsRemaining;
         } else {
@@ -241,13 +255,13 @@ contract SimpleLotTrade {
 
     /* ---------- Taker FOK ---------- */
 
-    function takeBuyFOK(int32 limitTick, uint32 lots) external nonReentrant {
+    function takeBuyFOK(int256 limitTick, uint256 lots) external nonReentrant {
         require(hasBestSell, "no sells");
         require(lots > 0, "zero lots");
 
-        uint32 remain = lots;
-        int32 t = bestSellTick;
-        int32 lastFilled;
+        uint256 remain = lots;
+        int256 t = bestSellTick;
+        int256 lastFilled;
         bool filled;
 
         while (remain > 0) {
@@ -257,9 +271,9 @@ contract SimpleLotTrade {
             require(oid != 0, "empty level");
 
             Order storage m = orders[oid];
-            uint32 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
+            uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
 
-            uint256 price = _tetcPerLotFromTick(t);
+            uint256 price = PriceTicks.price(t);
             uint256 pay = uint256(f) * price;
 
             // Taker pays maker in TETC
@@ -281,7 +295,7 @@ contract SimpleLotTrade {
             }
 
             if (lvl.head == 0) {
-                int32 nxt = lvl.next;
+                int256 nxt = lvl.next;
                 _removeTick(false, t);
                 if (nxt == NONE) break;
                 t = nxt;
@@ -295,13 +309,13 @@ contract SimpleLotTrade {
         }
     }
 
-    function takeSellFOK(int32 limitTick, uint32 lots) external nonReentrant {
+    function takeSellFOK(int256 limitTick, uint256 lots) external nonReentrant {
         require(hasBestBuy, "no buys");
         require(lots > 0, "zero lots");
 
-        uint32 remain = lots;
-        int32 t = bestBuyTick;
-        int32 lastFilled;
+        uint256 remain = lots;
+        int256 t = bestBuyTick;
+        int256 lastFilled;
         bool filled;
 
         while (remain > 0) {
@@ -311,9 +325,9 @@ contract SimpleLotTrade {
             require(oid != 0, "empty level");
 
             Order storage m = orders[oid];
-            uint32 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
+            uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
 
-            uint256 price = _tetcPerLotFromTick(t);
+            uint256 price = PriceTicks.price(t);
             uint256 pay = uint256(f) * price;
 
             // Taker delivers TKN10K to maker (buyer)
@@ -335,7 +349,7 @@ contract SimpleLotTrade {
             }
 
             if (lvl.head == 0) {
-                int32 nxt = lvl.next;
+                int256 nxt = lvl.next;
                 _removeTick(true, t);
                 if (nxt == NONE) break;
                 t = nxt;
@@ -372,19 +386,19 @@ contract SimpleLotTrade {
         view
         returns (BookOrder[] memory out, uint256 n)
     {
-        if (maxOrders == 0) return (new BookOrder, 0);
+        if (maxOrders == 0) return (new BookOrder[](0), 0);
 
         if (isBuy) {
-            if (!hasBestBuy) return (new BookOrder, 0);
+            if (!hasBestBuy) return (new BookOrder[](0), 0);
         } else {
-            if (!hasBestSell) return (new BookOrder, 0);
+            if (!hasBestSell) return (new BookOrder[](0), 0);
         }
 
         out = new BookOrder[](maxOrders);
         n = 0;
 
         if (isBuy) {
-            int32 t = bestBuyTick;
+            int256 t = bestBuyTick;
             while (t != NONE && n < maxOrders) {
                 TickLevel storage lvl = buyLevels[t];
                 uint256 oid = lvl.head;
@@ -396,7 +410,7 @@ contract SimpleLotTrade {
                 t = lvl.next;
             }
         } else {
-            int32 t = bestSellTick;
+            int256 t = bestSellTick;
             while (t != NONE && n < maxOrders) {
                 TickLevel storage lvl = sellLevels[t];
                 uint256 oid = lvl.head;
@@ -431,26 +445,26 @@ contract SimpleLotTrade {
         view
         returns (BookLevel[] memory out, uint256 n)
     {
-        if (maxLevels == 0) return (new BookLevel, 0);
+        if (maxLevels == 0) return (new BookLevel[](0), 0);
 
         if (isBuy) {
-            if (!hasBestBuy) return (new BookLevel, 0);
+            if (!hasBestBuy) return (new BookLevel[](0), 0);
         } else {
-            if (!hasBestSell) return (new BookLevel, 0);
+            if (!hasBestSell) return (new BookLevel[](0), 0);
         }
 
         out = new BookLevel[](maxLevels);
         n = 0;
 
         if (isBuy) {
-            int32 t = bestBuyTick;
+            int256 t = bestBuyTick;
             while (t != NONE && n < maxLevels) {
                 TickLevel storage lvl = buyLevels[t];
                 if (lvl.totalLots > 0) out[n++] = BookLevel(t, lvl.totalLots, lvl.orderCount);
                 t = lvl.next;
             }
         } else {
-            int32 t = bestSellTick;
+            int256 t = bestSellTick;
             while (t != NONE && n < maxLevels) {
                 TickLevel storage lvl = sellLevels[t];
                 if (lvl.totalLots > 0) out[n++] = BookLevel(t, lvl.totalLots, lvl.orderCount);
@@ -460,8 +474,8 @@ contract SimpleLotTrade {
     }
 
     function getTopOfBook() external view returns (
-        bool hasBuy, int32 buyTick, uint32 buyLots, uint32 buyOrders,
-        bool hasSell, int32 sellTick, uint32 sellLots, uint32 sellOrders
+        bool hasBuy, int256 buyTick, uint256 buyLots, uint256 buyOrders,
+        bool hasSell, int256 sellTick, uint256 sellLots, uint256 sellOrders
     ) {
         hasBuy = hasBestBuy;
         buyTick = bestBuyTick;
@@ -482,12 +496,12 @@ contract SimpleLotTrade {
 
     /* ---------- Internals: Orders / Levels ---------- */
 
-    function _newOrder(bool isBuy, int32 tick, uint32 lots) internal returns (uint256 id) {
+    function _newOrder(bool isBuy, int256 tick, uint256 lots) internal returns (uint256 id) {
         id = nextOrderId++;
-        orders[id] = Order(msg.sender, tick, lots, isBuy, 0, 0, true);
+        orders[id] = Order(msg.sender, tick, PriceTicks.price(tick), lots, isBuy, 0, 0, true);
     }
 
-    function _enqueue(bool isBuy, int32 tick, uint256 id) internal {
+    function _enqueue(bool isBuy, int256 tick, uint256 id) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
 
         if (!lvl.exists) {
@@ -508,7 +522,7 @@ contract SimpleLotTrade {
         lvl.totalLots += orders[id].lotsRemaining;
     }
 
-    function _insertTick(bool isBuy, int32 tick) internal {
+    function _insertTick(bool isBuy, int256 tick) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         lvl.exists = true;
         lvl.prev = NONE;
@@ -520,7 +534,7 @@ contract SimpleLotTrade {
                 bestBuyTick = tick;
                 return;
             }
-            int32 cur = bestBuyTick;
+            int256 cur = bestBuyTick;
             if (tick > cur) {
                 lvl.next = cur;
                 buyLevels[cur].prev = tick;
@@ -528,7 +542,7 @@ contract SimpleLotTrade {
                 return;
             }
             while (true) {
-                int32 nxt = buyLevels[cur].next;
+                int256 nxt = buyLevels[cur].next;
                 if (nxt == NONE || tick > nxt) {
                     lvl.prev = cur;
                     lvl.next = nxt;
@@ -544,7 +558,7 @@ contract SimpleLotTrade {
                 bestSellTick = tick;
                 return;
             }
-            int32 cur = bestSellTick;
+            int256 cur = bestSellTick;
             if (tick < cur) {
                 lvl.next = cur;
                 sellLevels[cur].prev = tick;
@@ -552,7 +566,7 @@ contract SimpleLotTrade {
                 return;
             }
             while (true) {
-                int32 nxt = sellLevels[cur].next;
+                int256 nxt = sellLevels[cur].next;
                 if (nxt == NONE || tick < nxt) {
                     lvl.prev = cur;
                     lvl.next = nxt;
@@ -565,7 +579,7 @@ contract SimpleLotTrade {
         }
     }
 
-    function _removeHead(bool isBuy, int32 tick) internal {
+    function _removeHead(bool isBuy, int256 tick) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         uint256 id = lvl.head;
         uint256 n = orders[id].next;
@@ -575,7 +589,7 @@ contract SimpleLotTrade {
         lvl.orderCount--;
     }
 
-    function _unlinkOrder(bool isBuy, int32 tick, uint256 id) internal {
+    function _unlinkOrder(bool isBuy, int256 tick, uint256 id) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         Order storage o = orders[id];
 
@@ -589,10 +603,10 @@ contract SimpleLotTrade {
         if (lvl.head == 0) _removeTick(isBuy, tick);
     }
 
-    function _removeTick(bool isBuy, int32 tick) internal {
+    function _removeTick(bool isBuy, int256 tick) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
-        int32 p = lvl.prev;
-        int32 n = lvl.next;
+        int256 p = lvl.prev;
+        int256 n = lvl.next;
 
         if (isBuy) {
             if (p == NONE) bestBuyTick = n;
@@ -611,50 +625,25 @@ contract SimpleLotTrade {
 
     /* ---------- Price ---------- */
 
-    function _pow10(uint32 k) internal pure returns (uint256) {
-        // only used for k in [0..4]
-        if (k == 0) return 1;
-        if (k == 1) return 10;
-        if (k == 2) return 100;
-        if (k == 3) return 1000;
-        return 10000;
-    }
-
     /// @notice TETC base units (wei-style) per 1 lot at `tick` using 464-ticks/decade mantissa grid.
     /// @dev tick 0 => 1e18.
-    function _tetcPerLotFromTick(int32 tick) internal pure returns (uint256 p) {
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick range");
 
-        tick -= MIN_TICK; // shift to non-negative for division
-        int32 decade = tick / 464;
-        int32 r = tick % 464;
-
-        uint256 m = PriceTicks.mantissa(uint32(uint32(r))); // 1000..9950
-        p = m * 1e15;
-
-        if (decade > 0) {
-            p *= _pow10(uint32(uint32(decade)));
-        } else if (decade < 0) {
-            p /= _pow10(uint32(uint32(-decade)));
-        }
+    function tetcPerLotForTick(int256 tick) external pure returns (uint256) {
+        return PriceTicks.price(tick);
     }
 
-    function tetcPerLotForTick(int32 tick) external pure returns (uint256) {
-        return _tetcPerLotFromTick(tick);
-    }
-
-    function getBestTicks() external view returns (bool, int32, bool, int32) {
+    function getBestTicks() external view returns (bool, int256, bool, int256) {
         return (hasBestBuy, bestBuyTick, hasBestSell, bestSellTick);
     }
 
-    function getLevel(bool isBuy, int32 tick) external view returns (
+    function getLevel(bool isBuy, int256 tick) external view returns (
         bool exists,
-        int32 prev,
-        int32 next,
+        int256 prev,
+        int256 next,
         uint256 head,
         uint256 tail,
-        uint32 orderCount,
-        uint32 totalLots
+        uint256 orderCount,
+        uint256 totalLots
     ) {
         TickLevel storage l = isBuy ? buyLevels[tick] : sellLevels[tick];
         return (l.exists, l.prev, l.next, l.head, l.tail, l.orderCount, l.totalLots);
