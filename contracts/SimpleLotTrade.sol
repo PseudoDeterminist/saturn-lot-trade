@@ -166,6 +166,14 @@ contract SimpleLotTrade {
     int256 public bestBuyTick;
     int256 public bestSellTick;
 
+    // Book return structs
+    struct BookOrder {
+        uint256 id;
+        address owner;
+        int256 tick;
+        uint256 lotsRemaining;
+    }
+
     struct BookLevel {
         int256 tick;
         uint256 totalLots;
@@ -353,7 +361,66 @@ contract SimpleLotTrade {
         }
     }
 
-    /* ---------- Depth Views (single-pass, bounded) ---------- */
+    /* ---------- Full Book + Depth Views (single-pass, bounded) ---------- */
+
+    function getFullBuyBook(uint256 maxOrders)
+        external
+        view
+        returns (BookOrder[] memory out, uint256 n)
+    {
+        return _getFullBookSinglePass(true, maxOrders);
+    }
+
+    function getFullSellBook(uint256 maxOrders)
+        external
+        view
+        returns (BookOrder[] memory out, uint256 n)
+    {
+        return _getFullBookSinglePass(false, maxOrders);
+    }
+
+    function _getFullBookSinglePass(bool isBuy, uint256 maxOrders)
+        internal
+        view
+        returns (BookOrder[] memory out, uint256 n)
+    {
+        if (maxOrders == 0) return (new BookOrder[](0), 0);
+
+        if (isBuy) {
+            if (!hasBestBuy) return (new BookOrder[](0), 0);
+        } else {
+            if (!hasBestSell) return (new BookOrder[](0), 0);
+        }
+
+        out = new BookOrder[](maxOrders);
+        n = 0;
+
+        if (isBuy) {
+            int256 t = bestBuyTick;
+            while (t != NONE && n < maxOrders) {
+                TickLevel storage lvl = buyLevels[t];
+                uint256 oid = lvl.head;
+                while (oid != 0 && n < maxOrders) {
+                    Order storage o = orders[oid];
+                    out[n++] = BookOrder(oid, o.owner, o.tick, o.lotsRemaining);
+                    oid = o.next;
+                }
+                t = lvl.next;
+            }
+        } else {
+            int256 t = bestSellTick;
+            while (t != NONE && n < maxOrders) {
+                TickLevel storage lvl = sellLevels[t];
+                uint256 oid = lvl.head;
+                while (oid != 0 && n < maxOrders) {
+                    Order storage o = orders[oid];
+                    out[n++] = BookOrder(oid, o.owner, o.tick, o.lotsRemaining);
+                    oid = o.next;
+                }
+                t = lvl.next;
+            }
+        }
+    }
 
     function getBuyBookDepth(uint256 maxLevels)
         external

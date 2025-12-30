@@ -107,16 +107,19 @@ describe("SimpleLotTrade load tests", function () {
     expect(buyDepth[0][0].totalLots).to.equal(BigInt(BUY_ORDERS));
     expect(sellDepth[0][0].totalLots).to.equal(BigInt(SELL_ORDERS));
 
+    const fullBuy = await clob.getFullBuyBook(BigInt(BUY_ORDERS));
+    const fullSell = await clob.getFullSellBook(BigInt(SELL_ORDERS));
+    expect(fullBuy[1]).to.equal(BigInt(BUY_ORDERS));
+    expect(fullSell[1]).to.equal(BigInt(SELL_ORDERS));
+
     // Cancel a slice of buys to exercise removal paths.
     for (let i = 0; i < Math.min(CANCEL_COUNT, buyIds.length); i += 1) {
       const trader = traders[i % traders.length];
       await clob.connect(trader).cancel(buyIds[i]);
     }
 
-    const afterCancel = await clob.getBuyBookDepth(10n);
-    const remaining = BigInt(BUY_ORDERS - Math.min(CANCEL_COUNT, buyIds.length));
-    expect(afterCancel[0][0].totalLots).to.equal(remaining);
-    expect(afterCancel[0][0].orderCount).to.equal(remaining);
+    const afterCancel = await clob.getFullBuyBook(BigInt(BUY_ORDERS));
+    expect(afterCancel[1]).to.equal(BigInt(BUY_ORDERS - Math.min(CANCEL_COUNT, buyIds.length)));
   });
 
   it("handles taker FOK across depth", async () => {
