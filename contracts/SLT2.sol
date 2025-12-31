@@ -2,10 +2,10 @@
 pragma solidity ^0.8.28;
 
 /*
-  SimpleLotTrade v0.4.2 (Mordor Testnet)
-  -------------------------------------
+  SimpleLotTrade v0.5.0 (Design)
+  ------------------------------
   - Tick-only Central Limit Order Book for TKN10K lots (decimals=0), priced in TETC (18 decimals)
-  - FOK takers only (same traversal behavior as v0.3.x)
+  - FOK takers only
   - NO internal deposit/withdraw balances:
       * Makers escrow tokens inside the contract on order placement
       * Escrow is released on fill/partial fill/cancel
@@ -14,8 +14,11 @@ pragma solidity ^0.8.28;
       * Mantissa table: 464 uint16 values (1000..9950), packed into a single bytes constant
       * Tick 0 price = 1e18 (1.000 TETC per lot)
       * Tick range: [-2320, +2320]  (i.e., [-5 decades, +5 decades])
-  - NEW in v0.4.2:
-      * bookVersion: increments once per successful book-mutating tx (place/cancel/take)
+
+  Added for "no-backend / IPFS UI" support:
+  - Events for OrderPlaced / OrderCanceled / OrderFilled
+  - Ring buffer of recent trades (constant-size, fast eth_call)
+  - Weekly OHLCV candles (block-based week buckets, fast eth_call)
 */
 
 interface IERC20 {
@@ -30,9 +33,10 @@ contract SimpleLotTrade {
     int256 private constant MIN_TICK = -2320;
     int256 private constant MAX_TICK =  2320;
 
-    int256 private constant NONE = type(int256).min;
-
     // 464 uint16 values packed big-endian, 2 bytes each.
+    // Total bytes = 928 (29*32)
+
+    // Packed mantissa bytes
     bytes internal constant MANT =
         hex"03e803ed03f203f703fc04010406040b04100416041b04200425042b04300435"
         hex"043b04400445044b04500456045b04610466046c04720477047d04830489048e"
@@ -64,6 +68,7 @@ contract SimpleLotTrade {
         hex"2154217e21a921d421ff222a2256228122ad22d923062332235f238c23b923e7"
         hex"241524432471249f24ce24fd252c255b258b25bb25eb261b264b267c26ad26de";
 
+    // Precomputed order of magnitude factors (1e10 .. 1e19), big-endian uint256 words.
     bytes internal constant DECADES =
         hex"00000000000000000000000000000000000000000000000000000002540be400"  // 1e10
         hex"000000000000000000000000000000000000000000000000000000174876e800"  // 1e11
@@ -79,14 +84,139 @@ contract SimpleLotTrade {
     IERC20 public immutable TETC;    // quote token (18 decimals)
     IERC20 public immutable TKN10K;  // base token (0 decimals, integer lots)
 
-    // NEW: increments on any successful book mutation (place/cancel/take)
-    uint256 public bookVersion;
+    int256 private constant NONE = type(int256).min;
 
-    // Oracle
+    /* ---------- Events (UI change stream) ---------- */
+
+    event OrderPlaced(
+        uint256 indexed id,
+        address indexed owner,
+        bool indexed isBuy,
+        int256 tick,
+        uint256 lots,
+        uint256 escrowedAmount // TETC for buys, TKN10K-lots for sells
+    );
+
+    event OrderCanceled(
+        uint256 indexed id,
+        address indexed owner,
+        bool indexed isBuy,
+        int256 tick,
+        uint256 lotsCanceled,
+        uint256 refundAmount // TETC for buys, TKN10K-lots for sells
+    );
+
+    event OrderFilled(
+        uint256 indexed id,
+        address indexed maker,
+        address indexed taker,
+        bool makerIsBuy,
+        int256 tick,
+        uint256 lotsFilled,
+        uint256 quotePaid // TETC amount
+    );
+
+    /* ---------- "Recent trades" ring buffer (fast eth_call tape) ---------- */
+
+    uint256 public constant RECENT_N = 512;
+    uint256 public recentTradeIndex; // monotonically increasing
+
+    struct RecentTrade {
+        uint64 blockNumber;
+        int32  tick;
+        uint128 lots;
+        uint8  flags; // bit0 = takerIsBuy
+    }
+
+    mapping(uint256 => RecentTrade) private _recentTrades; // index%RECENT_N -> RecentTrade
+
+    function getRecentTrades(uint256 count) external view returns (RecentTrade[] memory out) {
+        if (count > RECENT_N) count = RECENT_N;
+        uint256 end = recentTradeIndex; // one past last
+        uint256 start = end > count ? end - count : 0;
+        uint256 n = end - start;
+        out = new RecentTrade[](n);
+
+        for (uint256 k = 0; k < n; k++) {
+            out[k] = _recentTrades[(start + k) % RECENT_N];
+        }
+    }
+
+    function _recordRecentTrade(int256 tick, uint256 lots, bool takerIsBuy) internal {
+        // Clamp only by type-casts that should be safe for your intended market sizes.
+        // If you expect > 2^128 lots per fill, you should widen this.
+        require(lots <= type(uint128).max, "lots too big");
+
+        uint256 i = recentTradeIndex++;
+        _recentTrades[i % RECENT_N] = RecentTrade({
+            blockNumber: uint64(block.number),
+            tick: int32(tick),
+            lots: uint128(lots),
+            flags: takerIsBuy ? uint8(1) : uint8(0)
+        });
+    }
+
+    /* ---------- Weekly OHLCV candles (block-based buckets) ---------- */
+
+    // ETC target is ~13s; 7 days ~ 46500 blocks. Adjust if you want a different cadence.
+    uint256 public constant BLOCKS_PER_WEEK = 46500;
+
+    struct Candle {
+        bool   exists;
+        int32  open;
+        int32  high;
+        int32  low;
+        int32  close;
+        uint128 volumeLots;
+        uint64  firstBlock;
+        uint64  lastBlock;
+    }
+
+    mapping(uint256 => Candle) public weekly; // weekIndex => Candle
+
+    function currentWeekIndex() public view returns (uint256) {
+        return block.number / BLOCKS_PER_WEEK;
+    }
+
+    function getWeeklyCandles(uint256 startWeek, uint256 count) external view returns (Candle[] memory out) {
+        out = new Candle[](count);
+        for (uint256 i = 0; i < count; i++) {
+            out[i] = weekly[startWeek + i];
+        }
+    }
+
+    function _updateWeeklyCandle(int256 tick, uint256 lots) internal {
+        require(lots <= type(uint128).max, "lots too big");
+        uint256 w = block.number / BLOCKS_PER_WEEK;
+
+        Candle storage c = weekly[w];
+        int32 t = int32(tick);
+
+        if (!c.exists) {
+            c.exists = true;
+            c.open = t;
+            c.high = t;
+            c.low = t;
+            c.close = t;
+            c.volumeLots = uint128(lots);
+            c.firstBlock = uint64(block.number);
+            c.lastBlock  = uint64(block.number);
+        } else {
+            if (t > c.high) c.high = t;
+            if (t < c.low)  c.low  = t;
+            c.close = t;
+            c.volumeLots += uint128(lots);
+            c.lastBlock = uint64(block.number);
+        }
+    }
+
+    /* ---------- Oracle ---------- */
+
     int256 public lastTradeTick;
     uint256 public lastTradeBlock;
 
-    // Reentrancy guard (token transfers)
+    /* ---------- Reentrancy guard (token transfers) ---------- */
+
     uint256 private _lock = 1;
     modifier nonReentrant() {
         require(_lock == 1, "reentrancy");
@@ -94,6 +224,8 @@ contract SimpleLotTrade {
         _;
         _lock = 1;
     }
+
+    /* ---------- Book structures ---------- */
 
     struct Order {
         address owner;
@@ -152,13 +284,14 @@ contract SimpleLotTrade {
     function priceAtTick(int256 tick) public pure returns (uint256 result) {
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
-        uint256 t = uint256(tick - MIN_TICK);
-        uint256 d = t / 464;
-        uint256 r = t % 464;
+        uint256 t = uint256(tick - MIN_TICK); // safe because of require above
+        uint256 d = t / 464;                  // decade index
+        uint256 r = t % 464;                  // mantissa index
 
         uint256 i = r * 2;
         uint256 m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
 
+        // Copy DECADES to memory so we can reference it in assembly
         bytes memory decadesData = DECADES;
         uint256 factor;
         assembly {
@@ -175,47 +308,50 @@ contract SimpleLotTrade {
         require(!hasBestSell || bestSellTick > tick, "crossing sell book");
 
         uint256 cost = uint256(lots) * priceAtTick(tick);
+
+        // Escrow TETC in this contract
         require(TETC.transferFrom(msg.sender, address(this), cost), "TETC transferFrom failed");
 
         id = _newOrder(true, tick, lots);
         _enqueue(true, tick, id);
 
-        // book mutated successfully
-        bookVersion += 1;
+        emit OrderPlaced(id, msg.sender, true, tick, lots, cost);
     }
 
     function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
         require(lots > 0, "zero lots");
         require(!hasBestBuy || bestBuyTick < tick, "crossing buy book");
 
+        // Escrow TKN10K lots in this contract (integer token)
         require(TKN10K.transferFrom(msg.sender, address(this), uint256(lots)), "TKN10K transferFrom failed");
 
         id = _newOrder(false, tick, lots);
         _enqueue(false, tick, id);
 
-        // book mutated successfully
-        bookVersion += 1;
+        emit OrderPlaced(id, msg.sender, false, tick, lots, lots);
     }
 
     function cancel(uint256 id) external nonReentrant {
         Order storage o = orders[id];
         require(o.exists && o.owner == msg.sender, "not owner");
 
+        // Refund remaining escrow
         if (o.isBuy) {
             uint256 refund = uint256(o.lotsRemaining) * priceAtTick(o.tick);
             require(TETC.transfer(msg.sender, refund), "TETC refund failed");
             buyLevels[o.tick].totalLots -= o.lotsRemaining;
+
+            emit OrderCanceled(id, msg.sender, true, o.tick, o.lotsRemaining, refund);
         } else {
             uint256 refundLots = uint256(o.lotsRemaining);
             require(TKN10K.transfer(msg.sender, refundLots), "TKN10K refund failed");
             sellLevels[o.tick].totalLots -= o.lotsRemaining;
+
+            emit OrderCanceled(id, msg.sender, false, o.tick, o.lotsRemaining, refundLots);
         }
 
         _unlinkOrder(o.isBuy, o.tick, id);
         delete orders[id];
-
-        // book mutated successfully
-        bookVersion += 1;
     }
 
     /* ---------- Taker FOK ---------- */
@@ -226,8 +362,6 @@ contract SimpleLotTrade {
 
         uint256 remain = lots;
         int256 t = bestSellTick;
-        int256 lastFilled;
-        bool filled;
 
         while (remain > 0) {
             require(t <= limitTick, "FOK");
@@ -240,15 +374,24 @@ contract SimpleLotTrade {
 
             uint256 pay = uint256(f) * priceAtTick(t);
 
+            // Taker pays maker in TETC
             require(TETC.transferFrom(msg.sender, m.owner, pay), "TETC pay failed");
+
+            // Contract releases escrowed TKN10K to taker
             require(TKN10K.transfer(msg.sender, uint256(f)), "TKN10K deliver failed");
 
+            // Book accounting
             m.lotsRemaining -= f;
             lvl.totalLots -= f;
             remain -= f;
 
-            lastFilled = t;
-            filled = true;
+            // UI + derived data
+            emit OrderFilled(oid, m.owner, msg.sender, false /*makerIsBuy*/, t, f, pay);
+            _recordRecentTrade(t, f, true /*takerIsBuy*/);
+            _updateWeeklyCandle(t, f);
+
+            lastTradeTick = t;
+            lastTradeBlock = block.number;
 
             if (m.lotsRemaining == 0) {
                 _removeHead(false, t);
@@ -264,11 +407,6 @@ contract SimpleLotTrade {
         }
 
         require(remain == 0, "unfilled");
-            lastTradeTick = lastFilled;
-            lastTradeBlock = block.number;
-
-            // book mutated successfully
-            bookVersion += 1;
     }
 
     function takeSellFOK(int256 limitTick, uint256 lots) external nonReentrant {
@@ -277,8 +415,6 @@ contract SimpleLotTrade {
 
         uint256 remain = lots;
         int256 t = bestBuyTick;
-        int256 lastFilled;
-        bool filled;
 
         while (remain > 0) {
             require(t >= limitTick, "FOK");
@@ -291,15 +427,24 @@ contract SimpleLotTrade {
 
             uint256 pay = uint256(f) * priceAtTick(t);
 
+            // Taker delivers TKN10K to maker (buyer)
             require(TKN10K.transferFrom(msg.sender, m.owner, uint256(f)), "TKN10K pay failed");
+
+            // Contract releases escrowed TETC to taker
             require(TETC.transfer(msg.sender, pay), "TETC deliver failed");
 
+            // Book accounting
             m.lotsRemaining -= f;
             lvl.totalLots -= f;
             remain -= f;
 
-            lastFilled = t;
-            filled = true;
+            // UI + derived data
+            emit OrderFilled(oid, m.owner, msg.sender, true /*makerIsBuy*/, t, f, pay);
+            _recordRecentTrade(t, f, false /*takerIsBuy*/);
+            _updateWeeklyCandle(t, f);
+
+            lastTradeTick = t;
+            lastTradeBlock = block.number;
 
             if (m.lotsRemaining == 0) {
                 _removeHead(true, t);
@@ -315,11 +460,6 @@ contract SimpleLotTrade {
         }
 
         require(remain == 0, "unfilled");
-            lastTradeTick = lastFilled;
-            lastTradeBlock = block.number;
-
-            // book mutated successfully
-            bookVersion += 1;
     }
 
     /* ---------- Full Book + Depth Views (single-pass, bounded) ---------- */
@@ -582,7 +722,7 @@ contract SimpleLotTrade {
         }
     }
 
-    /* ---------- Views ---------- */
+    /* ---------- Convenience Views ---------- */
 
     function getBestTicks() external view returns (bool, int256, bool, int256) {
         return (hasBestBuy, bestBuyTick, hasBestSell, bestSellTick);
