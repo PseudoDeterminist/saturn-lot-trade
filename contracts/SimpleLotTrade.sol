@@ -31,9 +31,9 @@ interface IERC20 {
 /* ===================== Lot CLOB ===================== */
 
 contract SimpleLotTrade {
-    // Tick range: -464*5 .. +464*5
-    int256 private constant MIN_TICK = -2320;
-    int256 private constant MAX_TICK =  2320;
+    // Tick range: -464 .. +464*3
+    int256 private constant MIN_TICK = -464;
+    int256 private constant MAX_TICK =  1392;
 
     int256 private constant NONE = type(int256).min;
 
@@ -170,7 +170,7 @@ contract SimpleLotTrade {
         hex"0a210a2e0a3b0a480a550a620a6f0a7d0a8a0a970aa50ab20ac00ace0adb0ae9"
         hex"0af70b050b130b210b2f0b3e0b4c0b5a0b690b770b860b950ba30bb20bc10bd0"
         hex"0bdf0bee0bfe0c0d0c1c0c2c0c3b0c4b0c5a0c6a0c7a0c8a0c9a0caa0cba0cca"
-        hex"0cda0ceb0cfb0d0c0d1c0c0d2d0d3e0d4f0d600d710d820d930da40db60dc70dd9"
+        hex"0cda0ceb0cfb0d0c0d1c0d2d0d3e0d4f0d600d710d820d930da40db60dc70dd9"
         hex"0dea0dfc0e0e0e200e320e440e560e680e7b0e8d0e9f0eb20ec50ed80eeb0efe"
         hex"0f110f240f370f4a0f5e0f720f850f990fad0fc10fd50fe90ffd10121026103b"
         hex"104f10641079108e10a310b810ce10e310f8110e1124113a11501166117c1192"
@@ -184,19 +184,6 @@ contract SimpleLotTrade {
         hex"1ec81ef01f171f3f1f661f8e1fb71fdf200820302059208320ac20d620ff2129"
         hex"2154217e21a921d421ff222a2256228122ad22d923062332235f238c23b923e7"
         hex"241524432471249f24ce24fd252c255b258b25bb25eb261b264b267c26ad26de";
-
-    // Precomputed decade factors 1e10..1e19 as 10 x 32-byte words
-    bytes internal constant DECADES =
-        hex"00000000000000000000000000000000000000000000000000000002540be400"  // 1e10
-        hex"000000000000000000000000000000000000000000000000000000174876e800"  // 1e11
-        hex"000000000000000000000000000000000000000000000000000000e8d4a51000"  // 1e12
-        hex"000000000000000000000000000000000000000000000000000009184e72a000"  // 1e13
-        hex"00000000000000000000000000000000000000000000000000005af3107a4000"  // 1e14
-        hex"00000000000000000000000000000000000000000000000000038d7ea4c68000"  // 1e15
-        hex"000000000000000000000000000000000000000000000000002386f26fc10000"  // 1e16
-        hex"000000000000000000000000000000000000000000000000016345785d8a0000"  // 1e17
-        hex"0000000000000000000000000000000000000000000000000de0b6b3a7640000"  // 1e18
-        hex"0000000000000000000000000000000000000000000000008ac7230489e80000"; // 1e19
 
     constructor(address tetcToken, address tkn10kToken) {
         require(tetcToken != address(0), "zero TETC");
@@ -212,23 +199,24 @@ contract SimpleLotTrade {
     /* -------------------- Price -------------------- */
 
     function priceAtTick(int256 tick) public pure returns (uint256 result) {
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
+    require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
-        uint256 t = uint256(tick - MIN_TICK); // safe because of require above
-        uint256 d = t / 464;                  // decade index
-        uint256 r = t % 464;                  // mantissa index
+    uint256 t = uint256(tick - MIN_TICK); // safe because of require above
+    uint256 d = t / 464;                  // decade index (0..4)
+    uint256 r = t % 464;                  // mantissa index
 
-        uint256 i = r * 2;
-        uint256 m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
+    uint256 i = r * 2;
+    uint256 m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
 
-        bytes memory decadesData = DECADES;
-        uint256 factor;
-        assembly {
-            factor := mload(add(add(decadesData, 0x20), mul(d, 0x20)))
-        }
+    uint256 factor;
+    if (d == 0) factor = 1e14;
+    else if (d == 1) factor = 1e15;
+    else if (d == 2) factor = 1e16;
+    else if (d == 3) factor = 1e17;
+    else factor = 1e18; // d == 4
 
-        result = factor * m;
-    }
+    result = factor * m;
+}
 
     /* -------------------- Hash chain helpers -------------------- */
 
@@ -388,32 +376,39 @@ contract SimpleLotTrade {
         while (remain > 0) {
             require(t <= limitTick, "FOK");
             TickLevel storage lvl = sellLevels[t];
-            uint256 oid = lvl.head;
-            require(oid != 0, "empty level");
+            require(lvl.head != 0, "empty level");
 
-            Order storage m = orders[oid];
-            uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
-
+            // Compute once per tick level
             uint256 price = priceAtTick(t);
-            uint256 pay = uint256(f) * price;
 
-            // Taker pays maker in TETC
-            require(TETC.transferFrom(msg.sender, m.owner, pay), "TETC pay failed");
+            // Drain this tick level before moving to next tick
+            while (remain > 0) {
+                uint256 oid = lvl.head;
+                if (oid == 0) break;
 
-            // Contract releases escrowed TKN10K to taker
-            require(TKN10K.transfer(msg.sender, uint256(f)), "TKN10K deliver failed");
+                Order storage m = orders[oid];
+                uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
 
-            m.lotsRemaining -= f;
-            lvl.totalLots -= f;
-            remain -= f;
+                uint256 pay = f * price;
 
-            _emitTrade(oid, msg.sender, m.owner, true, t, f, price, pay, m.lotsRemaining);
+                // Taker delivers TETC to maker (seller)
+                require(TETC.transferFrom(msg.sender, m.owner, pay), "TETC pay failed");
 
-            lastFilledTick = t;
+                // Contract releases escrowed TKN10K to taker
+                require(TKN10K.transfer(msg.sender, f), "TKN10K deliver failed");
 
-            if (m.lotsRemaining == 0) {
-                _removeHead(false, t);
-                delete orders[oid];
+                m.lotsRemaining -= f;
+                lvl.totalLots -= f;
+                remain -= f;
+
+                _emitTrade(oid, msg.sender, m.owner, true, t, f, price, pay, m.lotsRemaining);
+
+                lastFilledTick = t;
+
+                if (m.lotsRemaining == 0) {
+                    _removeHead(false, t);
+                    delete orders[oid];
+                }
             }
 
             if (lvl.head == 0) {
@@ -443,32 +438,39 @@ contract SimpleLotTrade {
         while (remain > 0) {
             require(t >= limitTick, "FOK");
             TickLevel storage lvl = buyLevels[t];
-            uint256 oid = lvl.head;
-            require(oid != 0, "empty level");
+            require(lvl.head != 0, "empty level");
 
-            Order storage m = orders[oid];
-            uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
-
+            // Compute once per tick level
             uint256 price = priceAtTick(t);
-            uint256 pay = uint256(f) * price;
 
-            // Taker delivers TKN10K to maker (buyer)
-            require(TKN10K.transferFrom(msg.sender, m.owner, uint256(f)), "TKN10K pay failed");
+            // Drain this tick level before moving to next tick
+            while (remain > 0) {
+                uint256 oid = lvl.head;
+                if (oid == 0) break;
 
-            // Contract releases escrowed TETC to taker
-            require(TETC.transfer(msg.sender, pay), "TETC deliver failed");
+                Order storage m = orders[oid];
+                uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
 
-            m.lotsRemaining -= f;
-            lvl.totalLots -= f;
-            remain -= f;
+                uint256 receiveAmt = f * price;
 
-            _emitTrade(oid, msg.sender, m.owner, false, t, f, price, pay, m.lotsRemaining);
+                // Taker delivers TKN10K to maker (buyer)
+                require(TKN10K.transferFrom(msg.sender, m.owner, f), "TKN10K pay failed");
 
-            lastFilledTick = t;
+                // Contract releases escrowed TETC to taker
+                require(TETC.transfer(msg.sender, receiveAmt), "TETC deliver failed");
 
-            if (m.lotsRemaining == 0) {
-                _removeHead(true, t);
-                delete orders[oid];
+                m.lotsRemaining -= f;
+                lvl.totalLots -= f;
+                remain -= f;
+
+                _emitTrade(oid, msg.sender, m.owner, false, t, f, price, receiveAmt, m.lotsRemaining);
+
+                lastFilledTick = t;
+
+                if (m.lotsRemaining == 0) {
+                    _removeHead(true, t);
+                    delete orders[oid];
+                }
             }
 
             if (lvl.head == 0) {
@@ -633,7 +635,6 @@ contract SimpleLotTrade {
 
         if (!lvl.exists) {
             _insertTick(isBuy, tick);
-            lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         }
 
         if (lvl.tail == 0) {
