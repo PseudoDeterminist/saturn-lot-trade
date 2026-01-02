@@ -369,7 +369,8 @@ contract SimpleLotTrade {
 
     /* -------------------- Taker FOK -------------------- */
 
-    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxQuoteIn) external nonReentrant {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxQuoteIn, uint256 deadlineBlock) external nonReentrant {
+        require(block.number <= deadlineBlock, "expired");
         require(hasBestSell, "no sells");
         require(lots > 0, "zero lots");
     
@@ -435,7 +436,8 @@ contract SimpleLotTrade {
         bookVersion += 1;
     }
     
-    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minQuoteOut) external nonReentrant {
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minQuoteOut, uint256 deadlineBlock) external nonReentrant {
+        require(block.number <= deadlineBlock, "expired");
         require(hasBestBuy, "no buys");
         require(lots > 0, "zero lots");
     
