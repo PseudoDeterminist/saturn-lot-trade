@@ -2,25 +2,23 @@
 pragma solidity ^0.8.28;
 
 /*
-  SimpleLotTrade v0.5.0 (Design / Mordor Testnet)
+  SimpleLotTrade v0.6.2 (Design / Mordor Testnet)
   -----------------------------------------------
   Core goals:
   - This is a Test Contract version, using test tokens we have created
       * TETC (Test ETC) as quote token and TKN10K (Test Token 10K) as base Lot token
       * TKN is base token but we wrap that in integer TKN10K lots (1 lot = 10,000 TKN)
-  - Tick-only Central Limit Order Book for TKN10K lots (decimals=0), priced in TETC (18 decimals)
-  - Fill Or Kill takers only
-  - No internal balances:
-      * Makers escrow tokens in the contract on order placement
-      * Escrow released on fill/partial fill/cancel
   - Price grid:
       * 464 ticks exponential growth curve from 1000 to 9950, repeating at "decades"  every 10x price 
       * Approximately 0.5% increase per tick
       * Mantissa table: 464 uint16 values (1000..9950) = 1 decade packed big-endian into bytes constant
       * Tick 0 price = 1e18 (1.000 TETC per lot)
       * Tick range: [-464, +1392] (5 decades down/up)
-  New in v0.5.0:
-  - bookVersion: increments once per successful book-mutating tx (place/cancel/take)
+  - Tick-only Central Limit Order Book for TKN10K lots (decimals=0), priced in TETC (18 decimals)
+  - Fill Or Kill takers only
+  - No internal balances:
+      * Makers escrow tokens in the contract on order placement
+      * Escrow released on fill/partial fill/cancel
   - Events + integrity:
       * historySeq increments per emitted event
       * historyHash chains over record hashes of each emitted event
@@ -44,12 +42,9 @@ contract SimpleLotTrade {
     IERC20 public immutable TETC;    // quote token (18 decimals)
     IERC20 public immutable TKN10K;  // base token (0 decimals, integer lots)
 
-    // Cheap UI staleness signal (increments once per successful book mutation)
-    uint256 public bookVersion;
-
     // Event integrity chain (increments once per emitted event)
-    uint256 public historySeq;
-    bytes32 public historyHash;
+    uint256 public historySeq; // defaults to 0
+    bytes32 public historyHash; // defaults to 0x00..00
 
     // Oracle
     int256 public lastTradeTick;
@@ -196,8 +191,6 @@ contract SimpleLotTrade {
         TKN10K = IERC20(tkn10kToken);
         bestBuyTick = NONE;
         bestSellTick = NONE;
-
-        // historySeq defaults to 0, historyHash defaults to 0x00..00
     }
 
     /* -------------------- Price -------------------- */
@@ -321,8 +314,6 @@ contract SimpleLotTrade {
         _enqueue(true, tick, id);
 
         _emitPlaced(id, msg.sender, true, tick, lots, cost);
-
-        bookVersion += 1;
     }
 
     function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
@@ -337,8 +328,6 @@ contract SimpleLotTrade {
         _enqueue(false, tick, id);
 
         _emitPlaced(id, msg.sender, false, tick, lots, lots);
-
-        bookVersion += 1;
     }
 
     function cancel(uint256 id) external nonReentrant {
@@ -363,8 +352,6 @@ contract SimpleLotTrade {
         _emitCanceled(id, msg.sender, o.isBuy, o.tick, lotsCanceled, refundAmount);
 
         delete orders[id];
-
-        bookVersion += 1;
     }
 
     /* -------------------- Taker FOK -------------------- */
@@ -432,8 +419,6 @@ contract SimpleLotTrade {
     
         lastTradeTick = lastFilledTick;
         lastTradeBlock = block.number;
-    
-        bookVersion += 1;
     }
     
     function takeSellFOK(int256 limitTick, uint256 lots, uint256 minQuoteOut, uint256 deadlineBlock) external nonReentrant {
@@ -497,8 +482,6 @@ contract SimpleLotTrade {
     
         lastTradeTick = lastFilledTick;
         lastTradeBlock = block.number;
-    
-        bookVersion += 1;
     }
 
     /* -------------------- Full Book + Depth Views (single-pass, bounded) -------------------- */
@@ -613,11 +596,8 @@ contract SimpleLotTrade {
 
     function getTopOfBook() external view returns (
         bool hasBuy, int256 buyTick, uint256 buyLots, uint256 buyOrders,
-        bool hasSell, int256 sellTick, uint256 sellLots, uint256 sellOrders,
-        uint256 version
+        bool hasSell, int256 sellTick, uint256 sellLots, uint256 sellOrders
     ) {
-        version = bookVersion;
-
         hasBuy = hasBestBuy;
         buyTick = bestBuyTick;
         if (hasBuy) {
