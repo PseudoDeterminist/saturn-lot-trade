@@ -3,22 +3,22 @@ pragma solidity ^0.8.28;
 
 /*
   SimpleLotTrade v0.6.2 (Design / Mordor Testnet)
-  -----------------------------------------------
-  Core goals:
+  By PseudoDeterminist
+  ----------------------------------------------------------------------------
+  - This contract does on chain price discovery using order book for lot trades
+      * Simple, gas efficient, secure design
   - This is a Test Contract version, using test tokens we have created
       * TETC (Test ETC) as quote token and TKN10K (Test Token 10K) as base Lot token
       * TKN is base token but we wrap that in integer TKN10K lots (1 lot = 10,000 TKN)
-  - Price grid:
+      * Base token TKN is never used directly in the contract
+  - We use a price grid to limit order book "dust moves" (moving in front of an order is a 0.5% move)
+      * Prices are represented as "ticks" on an exponential price curve:
       * 464 ticks exponential growth curve from 1000 to 9950, repeating at "decades"  every 10x price 
       * Approximately 0.5% increase per tick
-      * Mantissa table: 464 uint16 values (1000..9950) = 1 decade packed big-endian into bytes constant
+      * Mantissa table: 464 uint16 values (decimal 1000..9950) = 1 decade packed into bytes constant
+      * The mantissa represents (limit-excluded) prices from 1000 wei to 9950 wei per lot
       * Tick 0 price = 1e18 (1.000 TETC per lot)
       * Tick range: [-464, +1392] (5 decades down/up)
-  - Tick-only Central Limit Order Book for TKN10K lots (decimals=0), priced in TETC (18 decimals)
-  - Fill Or Kill takers only
-  - No internal balances:
-      * Makers escrow tokens in the contract on order placement
-      * Escrow released on fill/partial fill/cancel
   - Min Lot Price: ~0.1 TETC per lot; 0.00001 TETC per TKN
   - Max Lot Price: ~10000 TETC per lot; 1 TETC per TKN
       * This is not intended for market control, just to limit spam orders at low prices
@@ -27,6 +27,16 @@ pragma solidity ^0.8.28;
       * TKN economics should dictate MIN and MAX prices in any real deployment, set accordingly
       * higher MAX is less of a spam concern since makers must escrow TETC
       * MAX limit in place mainly for math safety
+  - Taker orders:
+      * Fill or Kill only (FOK)
+      * No resting taker orders
+      * No partial fills for takers
+  - Maker orders:
+      * Resting orders only
+      * Partial fills allowed
+  - No internal balances:
+      * Makers escrow tokens in the contract on order placement
+      * Escrow released on fill/partial fill/cancel
 */
 
 interface IERC20 {
@@ -117,6 +127,7 @@ contract SimpleLotTrade {
         uint256 tail;
         uint256 orderCount;
         uint256 totalLots;
+        uint256 price;
     }
 
     uint256 public nextOrderId = 1;
@@ -696,8 +707,8 @@ contract SimpleLotTrade {
 
     /* -------------------- Misc views -------------------- */
 
-    function getBestTicks() external view returns (bool, bool, int256, int256) {
-        return (hasBestBuy, hasBestSell, bestBuyTick, bestSellTick);
+    function getOracle() external view returns (bool, bool, int256, int256, int256, uint256) {
+        return (hasBestBuy, hasBestSell, bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock);
     }
 
     function getLevel(bool isBuy, int256 tick) external view returns (
