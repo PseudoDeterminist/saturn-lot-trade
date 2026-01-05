@@ -131,7 +131,6 @@ contract SimpleLotTrade {
         uint256 tail;
         uint256 orderCount;
         uint256 totalLots;
-        uint256 price;
     }
 
     uint256 public nextOrderId = 1;
@@ -270,8 +269,7 @@ contract SimpleLotTrade {
         require(bestSellTick==NONE || bestSellTick > tick, "crossing sell book");
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
-        uint256 price = priceAtTick(tick);
-        uint256 cost = uint256(lots) * price;
+        uint256 cost = lots * priceAtTick(tick);
 
         // Escrow TETC in this contract
         require(TETC.transferFrom(msg.sender, address(this), cost), "TETC transferFrom failed");
@@ -712,16 +710,16 @@ contract SimpleLotTrade {
         return (bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock);
     }
 
-    function getLevel(bool isBuy, int256 tick) external view returns (
-        bool exists,
-        int256 prev,
-        int256 next,
-        uint256 head,
-        uint256 tail,
-        uint256 orderCount,
-        uint256 totalLots
-    ) {
-        TickLevel storage l = isBuy ? buyLevels[tick] : sellLevels[tick];
-        return (l.exists, l.prev, l.next, l.head, l.tail, l.orderCount, l.totalLots);
-    }
+    // function getLevel(bool isBuy, int256 tick) external view returns (
+    //     bool exists,
+    //     int256 prev,
+    //     int256 next,
+    //     uint256 head,
+    //     uint256 tail,
+    //     uint256 orderCount,
+    //     uint256 totalLots
+    // ) {
+    //     TickLevel storage l = isBuy ? buyLevels[tick] : sellLevels[tick];
+    //     return (l.exists, l.prev, l.next, l.head, l.tail, l.orderCount, l.totalLots);
+    // }
 }
