@@ -404,7 +404,7 @@ contract SimpleLotrade {
     }
 
     function takeSellFOK(int256 limitTick, uint256 lots, uint256 minQuoteOut) external nonReentrant {
-        require(bestBuyTick != NONE, "there are no buy orders on book");
+        require(bestBuyTick != NONE, "There are no buy orders on book");
         require(lots > 0, "invalid lots");
         require(TKN10K.balanceOf(msg.sender) >= lots, "insufficient TKN10K");
         uint256 remain = lots;
@@ -480,7 +480,7 @@ contract SimpleLotrade {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
 
         if (!lvl.exists) {
-            _insertick(isBuy, tick);
+            _insertTick(isBuy, tick);
         }
 
         if (lvl.tail == 0) {
@@ -496,7 +496,7 @@ contract SimpleLotrade {
         lvl.totalLots += orders[id].lotsRemaining;
     }
 
-    function _insertick(bool isBuy, int256 tick) internal {
+    function _insertTick(bool isBuy, int256 tick) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         lvl.exists = true;
         lvl.prev = NONE;
