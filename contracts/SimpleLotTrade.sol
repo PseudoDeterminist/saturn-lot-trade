@@ -4,14 +4,13 @@ pragma solidity ^0.8.28;
 /*
   SimpleLotrade v0.6.3 (Design / Testnet)
   By PseudoDeterminist
-  ----------------------------------------------------------------------------
   See README at https://github.com/PseudoDeterminist/SimpleLotTrade for details.
-  ----------------------------------------------------------------------------
 */
 
 interface IERC20 {
     function transfer(address to, uint256 value) external returns (bool);
     function transferFrom(address from, address to, uint256 value) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 /* ===================== Lot CLOB ===================== */
@@ -20,6 +19,7 @@ contract SimpleLotrade {
     // Tick range: -464 .. +1855 (5 decades * 464 ticks/decade)
     int256 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
     int256 private constant MAX_TICK =  1855; // 9950 TETC per lot; 0.995 TETC per TKN
+    uint256 private constant MAX_LOTS = 100000;
 
     int256 private constant NONE = type(int256).min;
 
@@ -268,7 +268,7 @@ contract SimpleLotrade {
     /* -------------------- Maker Orders (escrow on placement) -------------------- */
 
     function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
-        require(lots > 0, "zero lots");
+        require(lots > 0 && lots < MAX_LOTS, "invalid lots");
         require(bestSellTick == NONE || bestSellTick > tick, "crossing sell book");
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
@@ -288,7 +288,7 @@ contract SimpleLotrade {
     }
 
     function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
-        require(lots > 0, "zero lots");
+        require(lots > 0, "invalid lots");
         require(bestBuyTick == NONE || bestBuyTick < tick, "crossing buy book");
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
@@ -337,7 +337,8 @@ contract SimpleLotrade {
 
     function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxQuoteIn) external nonReentrant {
         require(bestSellTick != NONE, "There are no sell orders on book");
-        require(lots > 0, "zero lots");
+        require(lots > 0 && lots < MAX_LOTS, "invalid lots");
+        require(TETC.balanceOf(msg.sender) >= maxQuoteIn, "insufficient TETC");
 
         uint256 remain = lots;
         uint256 spent = 0;
@@ -404,8 +405,8 @@ contract SimpleLotrade {
 
     function takeSellFOK(int256 limitTick, uint256 lots, uint256 minQuoteOut) external nonReentrant {
         require(bestBuyTick != NONE, "there are no buy orders on book");
-        require(lots > 0, "zero lots");
-
+        require(lots > 0, "invalid lots");
+        require(TKN10K.balanceOf(msg.sender) >= lots, "insufficient TKN10K");
         uint256 remain = lots;
         uint256 got = 0;
 
