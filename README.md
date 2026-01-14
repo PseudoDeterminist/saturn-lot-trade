@@ -1,7 +1,5 @@
 # Simple Lot Trading EVM Contract
 
-"Lot Trade is a per-pair, gas-only, lot-based on-chain orderbook designed for atomic settlement and low state growth. It uses a disciplined tick grid, explicit maker/taker roles, and Fill-Or-Kill execution to avoid partial leftovers and bloat. The contract is intentionally not a retail convenience engine; it is a clean settlement market whose prints can anchor price discovery for layers above it." -- short summary
-
 Maker orders that would cross the book are rejected; crossing the spread requires explicit taker FOK calls.
 
 This project demonstrates a basic Lot Trading token pair, intended for the Ethereum Classic blockchain. It's especially suited for ETC because it's meant to trade at the speed of proof of work: Slowly but at high value.
