@@ -25,7 +25,7 @@ async function main() {
   const TestERC20 = await ethers.getContractFactory("TestERC20");
 
   const tetcSupply = ethers.parseUnits("1000000", 18); // 1,000,000 TETC
-  const tknSupply = ethers.parseUnits("1000000", 0);  // 1,000,000 lots
+  const tknSupply = ethers.parseUnits("100000", 0);  // 100,000 lots
 
   const tetc = await TestERC20.deploy("Test ETC", "TETC", 18, tetcSupply);
   await waitForReceipt(tetc.deploymentTransaction(), "TETC deploy");
@@ -35,7 +35,7 @@ async function main() {
   await waitForReceipt(tkn10k.deploymentTransaction(), "TKN10K deploy");
   console.log("TKN10K:", tkn10k.target);
 
-  const SimpleLotTrade = await ethers.getContractFactory("SimpleLotTrade");
+  const SimpleLotTrade = await ethers.getContractFactory("SimpleLotrade");
   const clob = await SimpleLotTrade.deploy(tetc.target, tkn10k.target);
   await waitForReceipt(clob.deploymentTransaction(), "SimpleLotTrade deploy");
   console.log("SimpleLotTrade:", clob.target);

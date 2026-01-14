@@ -30,6 +30,7 @@ contract SimpleLotrade {
 
     // Oracle
     int256 public lastTradeTick;
+    uint256 public lastTradePrice;
     uint256 public lastTradeBlock;
     int256 public bestBuyTick;
     int256 public bestSellTick;
@@ -417,6 +418,7 @@ contract SimpleLotrade {
         require(remain == 0, "unfilled");
 
         lastTradeTick = lastFilledTick;
+        lastTradePrice = priceAtTick(lastFilledTick);
         lastTradeBlock = block.number;
     }
 
@@ -491,6 +493,7 @@ contract SimpleLotrade {
         require(got >= minTetcOut, "slippage");
 
         lastTradeTick = lastFilledTick;
+        lastTradePrice = priceAtTick(lastFilledTick);
         lastTradeBlock = block.number;
     }
 
@@ -690,25 +693,11 @@ contract SimpleLotrade {
         return (bestBuyTick, buyLots, buyOrders, bestSellTick, sellLots, sellOrders);
     }
 
-    function getOracle() external view returns (int256, int256, int256, uint256) {
-        return (bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock);
+    function getOracle() external view returns (int256, int256, int256, uint256, uint256) {
+        return (bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock, lastTradePrice);
     }
 
     function getEscrowTotals() external view returns (uint256 buyTETC, uint256 sellTKN10K) {
         return (bookEscrowTETC, bookEscrowTKN10K);
-    }
-
-    function getLevel(bool isBuy, int256 tick) external view returns (
-        bool exists,
-        int256 prev,
-        int256 next,
-        uint256 head,
-        uint256 tail,
-        uint256 orderCount,
-        uint256 totalLots,
-        uint256 totalQuote
-    ) {
-        TickLevel storage l = isBuy ? buyLevels[tick] : sellLevels[tick];
-        return (l.exists, l.prev, l.next, l.head, l.tail, l.orderCount, l.totalLots, l.totalValue);
     }
 }
