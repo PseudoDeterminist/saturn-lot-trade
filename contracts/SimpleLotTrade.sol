@@ -390,10 +390,10 @@ contract SimpleLotrade {
 
                 remain -= f;
 
-                // Contract delivers TETC to maker (seller) AFTER state updates
+                // Contract delivers TETC to maker (seller) after state updates
                 TETC.safeTransfer(m.owner, pay);
 
-                // Contract releases escrowed TKN10K to taker AFTER state updates
+                // Contract releases escrowed TKN10K to taker (buyer) after state updates
                 TKN10K.safeTransfer(msg.sender, f);
 
                 _emitTrade(oid, msg.sender, m.owner, true, t, price, f, pay, m.lotsRemaining, m.valueRemaining);
@@ -460,10 +460,10 @@ contract SimpleLotrade {
 
                 remain -= f;
 
-                // Contract delivers TKN10K to maker (buyer) AFTER state updates
+                // Contract delivers TKN10K to maker (buyer) after state updates
                 TKN10K.safeTransfer(m.owner, f);
 
-                // Contract releases escrowed TETC to taker AFTER state updates
+                // Contract releases escrowed TETC to taker (seller) after state updates
                 TETC.safeTransfer(msg.sender, receiveAmt);
                 
 
