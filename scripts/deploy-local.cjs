@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { ethers } = require("hardhat");
+const { ethers, network } = require("hardhat");
 
 const ROOT = path.join(__dirname, "..");
 const ENV_PATH = path.join(ROOT, ".env");
@@ -52,8 +52,46 @@ function writeAddresses(entries) {
   updateUiConfig(UI_CONFIG_PATH, entries);
 }
 
+async function seedOrders(clob, tetc, tkn10k, waitForReceipt) {
+  const maxApprove = ethers.MaxUint256;
+
+  await waitForReceipt(await tetc.approve(clob.target, maxApprove), "TETC approve");
+  await waitForReceipt(await tkn10k.approve(clob.target, maxApprove), "TKN10K approve");
+
+  const sellSeeds = [
+    { tick: 121, lots: 60 },
+    { tick: 122, lots: 56 },
+    { tick: 123, lots: 52 },
+    { tick: 124, lots: 48 },
+    { tick: 125, lots: 44 }
+  ];
+
+  const buySeeds = [
+    { tick: 120, lots: 60 },
+    { tick: 119, lots: 56 },
+    { tick: 118, lots: 52 },
+    { tick: 117, lots: 48 },
+    { tick: 116, lots: 44 }
+  ];
+
+  for (const order of sellSeeds) {
+    await waitForReceipt(
+      await clob.placeSell(order.tick, order.lots),
+      `seed sell ${order.tick}`
+    );
+  }
+
+  for (const order of buySeeds) {
+    await waitForReceipt(
+      await clob.placeBuy(order.tick, order.lots),
+      `seed buy ${order.tick}`
+    );
+  }
+}
+
 async function main() {
   const [deployer] = await ethers.getSigners();
+  console.log("Network:", network.name, network.config.url || "in-process");
   console.log("Deployer:", deployer.address);
 
   async function waitForReceipt(tx, label) {
@@ -91,6 +129,9 @@ async function main() {
   const clob = await SimpleLotTrade.deploy(tetc.target, tkn10k.target);
   await waitForReceipt(clob.deploymentTransaction(), "SimpleLotTrade deploy");
   console.log("SimpleLotTrade:", clob.target);
+
+  await seedOrders(clob, tetc, tkn10k, waitForReceipt);
+  console.log("Seeded initial book orders.");
 
   const addresses = {
     TETC_ADDRESS: tetc.target,

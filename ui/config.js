@@ -1,9 +1,9 @@
 window.APP_CONFIG = {
   rpcUrl: "http://127.0.0.1:8545",
   chainId: 31337,
-  tetcAddress: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  tkn10kAddress: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  simpleLotTradeAddress: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+  tetcAddress: "0x68B1D87F95878fE05B998F19b66F4baba5De1aed",
+  tkn10kAddress: "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c",
+  simpleLotTradeAddress: "0xc6e7DF5E7b4f2A278906862b61205850344D4e7d",
   maxLevels: 25,
   maxOrders: 50
 };

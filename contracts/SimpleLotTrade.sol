@@ -299,10 +299,9 @@ contract SimpleLotrade {
         TETC.safeTransferFrom(msg.sender, address(this), cost); // reverts on insufficient balance/allowance
 
         id = _newOrder(true, tick, lots, cost);
-        _enqueue(true, tick, lots, price, cost, id);
+        _enqueue(true, tick, price, lots, cost, id);
 
-        // Track buy escrow (per-level and global)
-        buyLevels[tick].totalValue += cost;
+        // Track buy escrow (global)
         bookEscrowTETC += cost;
         bookAskTKN10K += lots;
 

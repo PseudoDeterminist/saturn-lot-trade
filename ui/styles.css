@@ -224,6 +224,15 @@ body {
   font-size: 0.85rem;
 }
 
+.empty-banner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(244, 184, 96, 0.12);
+  border: 1px solid rgba(244, 184, 96, 0.3);
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
 .chart-wrap {
   display: flex;
   flex-direction: column;
@@ -258,6 +267,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .field-inline {
@@ -500,7 +510,13 @@ body {
 }
 
 .table-row.orders {
-  grid-template-columns: 0.6fr 0.8fr 1.5fr 1fr;
+  grid-template-columns: 0.6fr 0.8fr 1.4fr 1fr 0.8fr;
+}
+
+.btn.mini {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 0.75rem;
 }
 
 .table-row .tag {

@@ -37,12 +37,15 @@ const el = {
   connectBtn: document.getElementById("connect-btn"),
   depthInput: document.getElementById("depth-input"),
   refreshBtn: document.getElementById("refresh-btn"),
+  seedBtn: document.getElementById("seed-btn"),
+  clearBtn: document.getElementById("clear-btn"),
   buyBook: document.getElementById("buy-book"),
   sellBook: document.getElementById("sell-book"),
   spreadValue: document.getElementById("spread-value"),
   midTick: document.getElementById("mid-tick"),
   bestBid: document.getElementById("best-bid"),
   bestAsk: document.getElementById("best-ask"),
+  emptyBanner: document.getElementById("empty-banner"),
   lastTrade: document.getElementById("last-trade"),
   escrowTotals: document.getElementById("escrow-totals"),
   midPrice: document.getElementById("mid-price"),
@@ -63,8 +66,10 @@ const el = {
 };
 
 const state = {
-  provider: null,
+  readProvider: null,
+  walletProvider: null,
   signer: null,
+  walletAddress: null,
   readContract: null,
   writeContract: null,
   tetc: null,
@@ -72,7 +77,9 @@ const state = {
   side: "buy",
   demoMode: false,
   lastTradeTick: null,
-  tape: []
+  tape: [],
+  readSource: "rpc",
+  readChainId: null
 };
 
 function toNumber(value) {
@@ -83,21 +90,25 @@ function toNumber(value) {
 
 function formatTetc(value, digits = 4) {
   if (value === null || value === undefined) return "--";
-  const numeric = Number(ethers.formatUnits(value, 18));
-  if (!Number.isFinite(numeric)) return "--";
+  const formatted = ethers.formatUnits(value, 18);
+  const numeric = Number(formatted);
+  if (!Number.isFinite(numeric)) return formatted;
   return numeric.toFixed(digits);
 }
 
+function formatInt(value) {
+  const str = BigInt(value).toString();
+  return str.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 function formatLots(value) {
-  const numeric = toNumber(value);
-  if (!Number.isFinite(numeric)) return "--";
-  return numeric.toString();
+  if (value === null || value === undefined) return "--";
+  return formatInt(value);
 }
 
 function formatTick(value) {
-  const numeric = toNumber(value);
-  if (!Number.isFinite(numeric)) return "--";
-  return numeric.toString();
+  if (value === null || value === undefined) return "--";
+  return BigInt(value).toString();
 }
 
 function shortAddr(addr) {
@@ -120,7 +131,23 @@ function setDemoMode(reason) {
   state.demoMode = true;
   setStatus("Demo mode", false);
   el.chainStatus.textContent = reason || "No RPC";
+  el.emptyBanner.hidden = true;
   renderDemo();
+}
+
+function errorMessage(err) {
+  if (!err) return "Unknown error";
+  return err.shortMessage || err.message || String(err);
+}
+
+async function safeCall(name, fn) {
+  try {
+    const value = await fn();
+    return { ok: true, name, value };
+  } catch (err) {
+    console.warn(`RPC ${name} failed:`, err);
+    return { ok: false, name, error: err };
+  }
 }
 
 function renderDemo() {
@@ -135,14 +162,23 @@ function renderDemo() {
 }
 
 async function initProvider() {
+  state.readProvider = new ethers.JsonRpcProvider(RPC_URL);
   if (window.ethereum) {
-    state.provider = new ethers.BrowserProvider(window.ethereum);
-  } else {
-    state.provider = new ethers.JsonRpcProvider(RPC_URL);
+    state.walletProvider = new ethers.BrowserProvider(window.ethereum);
   }
-  state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.provider);
-  if (TETC_ADDRESS) state.tetc = new ethers.Contract(TETC_ADDRESS, ERC20_ABI, state.provider);
-  if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.provider);
+  state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.readProvider);
+  if (TETC_ADDRESS) state.tetc = new ethers.Contract(TETC_ADDRESS, ERC20_ABI, state.readProvider);
+  if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.readProvider);
+  state.readSource = "rpc";
+}
+
+function useWalletForReads() {
+  if (!state.walletProvider) return false;
+  state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.walletProvider);
+  if (TETC_ADDRESS) state.tetc = new ethers.Contract(TETC_ADDRESS, ERC20_ABI, state.walletProvider);
+  if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.walletProvider);
+  state.readSource = "wallet";
+  return true;
 }
 
 async function connectWallet() {
@@ -151,15 +187,17 @@ async function connectWallet() {
     return;
   }
   try {
-    if (!state.provider) {
+    if (!state.walletProvider) {
       await initProvider();
     }
     await window.ethereum.request({ method: "eth_requestAccounts" });
-    state.signer = await state.provider.getSigner();
+    state.signer = await state.walletProvider.getSigner();
     state.writeContract = state.readContract.connect(state.signer);
-    const address = await state.signer.getAddress();
-    el.connectBtn.textContent = shortAddr(address);
+    state.walletAddress = (await state.signer.getAddress()).toLowerCase();
+    el.connectBtn.textContent = shortAddr(state.walletAddress);
     el.placeBtn.disabled = false;
+    el.clearBtn.disabled = false;
+    el.seedBtn.disabled = false;
     setTicketStatus("Wallet connected. Ready to place orders.");
   } catch (err) {
     setTicketStatus(`Wallet error: ${err.message || err}`);
@@ -172,10 +210,14 @@ function updateSpread(bestBid, bestAsk) {
     el.midTick.textContent = "--";
     return;
   }
-  const spread = bestAsk.price - bestBid.price;
-  const mid = (bestAsk.price + bestBid.price) / 2n;
+  const bidPrice = BigInt(bestBid.price);
+  const askPrice = BigInt(bestAsk.price);
+  const bidTick = BigInt(bestBid.tick);
+  const askTick = BigInt(bestAsk.tick);
+  const spread = askPrice - bidPrice;
+  const mid = (askPrice + bidPrice) / 2n;
   el.spreadValue.textContent = `${formatTetc(spread)} TETC`;
-  el.midTick.textContent = formatTick((bestAsk.tick + bestBid.tick) / 2n);
+  el.midTick.textContent = formatTick((askTick + bidTick) / 2n);
   el.midPrice.textContent = `${formatTetc(mid)} TETC`;
 }
 
@@ -209,6 +251,7 @@ function renderOrders(buyOrders, sellOrders) {
     rows.push({
       side: "buy",
       id: order.id,
+      owner: order.owner,
       tick: order.tick,
       price: order.price,
       lots: order.lotsRemaining
@@ -218,6 +261,7 @@ function renderOrders(buyOrders, sellOrders) {
     rows.push({
       side: "sell",
       id: order.id,
+      owner: order.owner,
       tick: order.tick,
       price: order.price,
       lots: order.lotsRemaining
@@ -227,14 +271,24 @@ function renderOrders(buyOrders, sellOrders) {
   el.openOrders.innerHTML = limited.length
     ? limited
         .map(
-          (row) => `
+          (row) => {
+            const isOwner =
+              state.walletAddress &&
+              row.owner &&
+              row.owner.toLowerCase() === state.walletAddress;
+            const action = isOwner
+              ? `<button class="btn ghost mini" data-cancel="${row.id}">Cancel</button>`
+              : `<span class="meta-label">--</span>`;
+            return `
         <div class="table-row orders">
           <span class="tag ${row.side}">${row.side.toUpperCase()}</span>
           <span>#${row.id}</span>
           <span>${formatTick(row.tick)} @ ${formatTetc(row.price)}</span>
           <span>${formatLots(row.lots)} lots</span>
+          ${action}
         </div>
-      `
+      `;
+          }
         )
         .join("")
     : "<div class=\"panel-sub\">No open orders.</div>";
@@ -288,7 +342,7 @@ function updateChart(buy, sell) {
 function buildDemoBook(side) {
   const base = side === "buy" ? 120 : 121;
   return Array.from({ length: 10 }, (_, i) => {
-    const tick = side === "buy" ? base - i : base + i;
+    const tick = BigInt(side === "buy" ? base - i : base + i);
     const price = 500000000000000000n + BigInt(i) * 10000000000000000n;
     const lots = BigInt(60 - i * 4);
     const total = lots * price;
@@ -319,30 +373,46 @@ async function refresh() {
   const maxOrders = MAX_ORDERS_DEFAULT;
 
   try {
-    const [buyRes, sellRes, oracle, escrow, buyOrdersRes, sellOrdersRes] = await Promise.all([
-      state.readContract.getBuyBook(depth),
-      state.readContract.getSellBook(depth),
-      state.readContract.getOracle(),
-      state.readContract.getEscrowTotals(),
-      state.readContract.getBuyOrders(maxOrders),
-      state.readContract.getSellOrders(maxOrders)
+    const [buyRes, sellRes, oracleRes, escrowRes] = await Promise.all([
+      safeCall("getBuyBook", () => state.readContract.getBuyBook(depth)),
+      safeCall("getSellBook", () => state.readContract.getSellBook(depth)),
+      safeCall("getOracle", () => state.readContract.getOracle()),
+      safeCall("getEscrowTotals", () => state.readContract.getEscrowTotals())
     ]);
 
-    const [buyBook, buyN] = buyRes;
-    const [sellBook, sellN] = sellRes;
-    const [buyOrders, buyOrdersN] = buyOrdersRes;
-    const [sellOrders, sellOrdersN] = sellOrdersRes;
+    if (!buyRes.ok || !sellRes.ok || !oracleRes.ok || !escrowRes.ok) {
+      const firstErr = [buyRes, sellRes, oracleRes, escrowRes].find((res) => !res.ok);
+      setDemoMode(`${firstErr.name}: ${errorMessage(firstErr.error)}`);
+      return;
+    }
 
-    const buyLevels = buyBook.slice(0, toNumber(buyN));
-    const sellLevels = sellBook.slice(0, toNumber(sellN));
-    const buyOrdersList = buyOrders.slice(0, toNumber(buyOrdersN));
-    const sellOrdersList = sellOrders.slice(0, toNumber(sellOrdersN));
+    const [buyBook, buyN] = buyRes.value;
+    const [sellBook, sellN] = sellRes.value;
+    const oracle = oracleRes.value;
+    const escrow = escrowRes.value;
+
+    const [buyOrdersRes, sellOrdersRes] = await Promise.all([
+      safeCall("getBuyOrders", () => state.readContract.getBuyOrders(maxOrders)),
+      safeCall("getSellOrders", () => state.readContract.getSellOrders(maxOrders))
+    ]);
+
+    const buyLevels = Array.from(buyBook).slice(0, toNumber(buyN));
+    const sellLevels = Array.from(sellBook).slice(0, toNumber(sellN));
+    const buyOrdersList = buyOrdersRes.ok
+      ? Array.from(buyOrdersRes.value[0]).slice(0, toNumber(buyOrdersRes.value[1]))
+      : [];
+    const sellOrdersList = sellOrdersRes.ok
+      ? Array.from(sellOrdersRes.value[0]).slice(0, toNumber(sellOrdersRes.value[1]))
+      : [];
 
     setStatus("Live", true);
-    el.chainStatus.textContent = `RPC ${RPC_URL}`;
+    el.emptyBanner.hidden = !(buyLevels.length === 0 && sellLevels.length === 0);
+    const sourceLabel = state.readSource === "rpc" ? "RPC" : "Wallet";
+    const chainLabel = state.readChainId ? ` chain ${state.readChainId}` : "";
+    el.chainStatus.textContent = `${sourceLabel}${chainLabel}`;
     renderBook(el.buyBook, buyLevels, "buy");
     renderBook(el.sellBook, sellLevels, "sell");
-    updateSpread(buyLevels[0], sellLevels[0]);
+    updateSpread(buyLevels.length ? buyLevels[0] : null, sellLevels.length ? sellLevels[0] : null);
     renderOrders(buyOrdersList, sellOrdersList);
     updateChart(buyLevels, sellLevels);
 
@@ -358,7 +428,7 @@ async function refresh() {
       (acc, lvl) => acc + BigInt(lvl.totalLots),
       0n
     );
-    el.liquidity.textContent = `${totalLots.toString()} lots`;
+    el.liquidity.textContent = `${formatLots(totalLots)} lots`;
 
     if (state.lastTradeTick !== null && state.lastTradeTick !== lastTradeTick) {
       state.tape.unshift({
@@ -371,9 +441,12 @@ async function refresh() {
     state.lastTradeTick = lastTradeTick;
     renderTape();
 
-    el.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+    const ordersNote = !buyOrdersRes.ok || !sellOrdersRes.ok
+      ? " (orders unavailable)"
+      : "";
+    el.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}${ordersNote}`;
   } catch (err) {
-    setDemoMode(err.message || "RPC error");
+    setDemoMode(errorMessage(err));
   }
 }
 
@@ -419,12 +492,143 @@ async function placeOrder() {
   }
 }
 
+async function cancelOrder(id) {
+  if (!state.writeContract) {
+    setTicketStatus("Connect a wallet to cancel orders.");
+    return;
+  }
+  try {
+    setTicketStatus(`Canceling #${id}...`);
+    const tx = await state.writeContract.cancel(id);
+    await tx.wait();
+    setTicketStatus(`Canceled #${id}.`);
+    await refresh();
+  } catch (err) {
+    setTicketStatus(`Cancel failed: ${err.message || err}`);
+  }
+}
+
+async function clearMyOrders() {
+  if (!state.writeContract || !state.walletAddress) {
+    setTicketStatus("Connect a wallet to clear orders.");
+    return;
+  }
+  try {
+    setTicketStatus("Canceling your orders...");
+    const [buyRes, sellRes] = await Promise.all([
+      state.readContract.getBuyOrders(MAX_ORDERS_DEFAULT),
+      state.readContract.getSellOrders(MAX_ORDERS_DEFAULT)
+    ]);
+    const [buyOrders, buyN] = buyRes;
+    const [sellOrders, sellN] = sellRes;
+    const orders = [
+      ...Array.from(buyOrders).slice(0, toNumber(buyN)),
+      ...Array.from(sellOrders).slice(0, toNumber(sellN))
+    ].filter((o) => o.owner && o.owner.toLowerCase() === state.walletAddress);
+
+    for (const order of orders) {
+      const tx = await state.writeContract.cancel(order.id);
+      await tx.wait();
+    }
+
+    setTicketStatus(orders.length ? "All your orders canceled." : "No orders to cancel.");
+    await refresh();
+  } catch (err) {
+    setTicketStatus(`Cancel failed: ${err.message || err}`);
+  }
+}
+
+async function seedOrders() {
+  if (!state.writeContract || !state.signer) {
+    setTicketStatus("Connect a wallet to seed orders.");
+    return;
+  }
+  if (!state.tetc || !state.tkn10k) {
+    setTicketStatus("Token addresses missing for seeding.");
+    return;
+  }
+  try {
+    const [buyRes, sellRes] = await Promise.all([
+      state.readContract.getBuyBook(1),
+      state.readContract.getSellBook(1)
+    ]);
+    if (toNumber(buyRes[1]) > 0 || toNumber(sellRes[1]) > 0) {
+      setTicketStatus("Book already has orders.");
+      return;
+    }
+
+    const sellSeeds = [
+      { tick: 121, lots: 60 },
+      { tick: 122, lots: 56 },
+      { tick: 123, lots: 52 },
+      { tick: 124, lots: 48 },
+      { tick: 125, lots: 44 }
+    ];
+
+    const buySeeds = [
+      { tick: 120, lots: 60 },
+      { tick: 119, lots: 56 },
+      { tick: 118, lots: 52 },
+      { tick: 117, lots: 48 },
+      { tick: 116, lots: 44 }
+    ];
+
+    const owner = await state.signer.getAddress();
+    const tetc = state.tetc.connect(state.signer);
+    const tkn10k = state.tkn10k.connect(state.signer);
+
+    let neededTetc = 0n;
+    for (const order of buySeeds) {
+      const price = await state.readContract.priceAtTick(order.tick);
+      neededTetc += price * BigInt(order.lots);
+    }
+    const neededTkn = sellSeeds.reduce((acc, order) => acc + BigInt(order.lots), 0n);
+
+    const [tetcAllowance, tknAllowance] = await Promise.all([
+      tetc.allowance(owner, CONTRACT_ADDRESS),
+      tkn10k.allowance(owner, CONTRACT_ADDRESS)
+    ]);
+
+    if (tetcAllowance < neededTetc) {
+      const tx = await tetc.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
+      await tx.wait();
+    }
+    if (tknAllowance < neededTkn) {
+      const tx = await tkn10k.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
+      await tx.wait();
+    }
+
+    setTicketStatus("Seeding orders...");
+    for (const order of sellSeeds) {
+      const tx = await state.writeContract.placeSell(order.tick, order.lots);
+      await tx.wait();
+    }
+    for (const order of buySeeds) {
+      const tx = await state.writeContract.placeBuy(order.tick, order.lots);
+      await tx.wait();
+    }
+
+    setTicketStatus("Seeded the book.");
+    await refresh();
+  } catch (err) {
+    setTicketStatus(`Seed failed: ${err.message || err}`);
+  }
+}
+
 function bindEvents() {
   el.connectBtn.addEventListener("click", connectWallet);
   el.refreshBtn.addEventListener("click", refresh);
   el.previewBtn.addEventListener("click", previewOrder);
   el.placeBtn.addEventListener("click", placeOrder);
   el.depthInput.addEventListener("change", refresh);
+  el.seedBtn.addEventListener("click", seedOrders);
+  el.clearBtn.addEventListener("click", clearMyOrders);
+  el.openOrders.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-cancel]");
+    if (!target) return;
+    const id = target.getAttribute("data-cancel");
+    if (id) cancelOrder(id);
+  });
 
   el.sideToggle.addEventListener("click", (event) => {
     const button = event.target.closest(".seg");
@@ -440,12 +644,26 @@ function bindEvents() {
 async function boot() {
   bindEvents();
   el.depthInput.value = MAX_LEVELS_DEFAULT.toString();
+  el.seedBtn.disabled = true;
+  el.clearBtn.disabled = true;
   try {
     await initProvider();
-    await state.provider.getNetwork();
+    const network = await state.readProvider.getNetwork();
+    state.readChainId = Number(network.chainId);
   } catch (err) {
-    setDemoMode(err.message || "No provider");
-    return;
+    if (state.walletProvider) {
+      try {
+        const network = await state.walletProvider.getNetwork();
+        state.readChainId = Number(network.chainId);
+        useWalletForReads();
+      } catch (walletErr) {
+        setDemoMode(walletErr.message || err.message || "No provider");
+        return;
+      }
+    } else {
+      setDemoMode(err.message || "No provider");
+      return;
+    }
   }
   await refresh();
   setInterval(refresh, 3000);
