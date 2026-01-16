@@ -23,12 +23,13 @@
         <div class="top-actions">
           <div class="pill" id="status-pill">Offline</div>
           <div class="pair-tag" id="pair-tag">TKN10K / TETC</div>
+          <button class="btn ghost" id="copy-btn">Copy Addresses</button>
           <button class="btn ghost" id="connect-btn">Connect Wallet</button>
         </div>
       </header>
 
       <section class="stats-strip">
-        <div class="stat">
+        <div class="stat" id="last-trade-stat">
           <span class="label">Last trade</span>
           <span class="value" id="last-trade">--</span>
         </div>
@@ -86,6 +87,11 @@
                 <span>Depth</span>
                 <input id="depth-input" type="number" min="1" max="200" value="25" />
               </label>
+              <div class="depth-toggle" id="depth-toggle">
+                <button class="chip active" data-depth="25">25</button>
+                <button class="chip" data-depth="50">50</button>
+                <button class="chip" data-depth="100">100</button>
+              </div>
               <button class="btn ghost" id="refresh-btn">Refresh</button>
               <button class="btn ghost" id="seed-btn">Seed</button>
               <button class="btn ghost" id="clear-btn" disabled>Clear My Orders</button>
@@ -153,13 +159,17 @@
                 <div class="meta-value" id="preview-value">--</div>
               </div>
             </div>
-            <div class="ticket-actions">
-              <button class="btn" id="preview-btn">Preview</button>
-              <button class="btn solid" id="place-btn" disabled>Place Order</button>
-            </div>
-            <div class="ticket-foot" id="ticket-status">Connect a wallet to trade.</div>
+          <div class="ticket-actions">
+            <button class="btn" id="preview-btn">Preview</button>
+            <button class="btn solid" id="place-btn" disabled>Place Order</button>
           </div>
-        </section>
+          <div class="wallet-actions">
+            <button class="btn ghost mini" id="add-tetc">Add TETC</button>
+            <button class="btn ghost mini" id="add-tkn10k">Add TKN10K</button>
+          </div>
+          <div class="ticket-foot" id="ticket-status">Connect a wallet to trade.</div>
+        </div>
+      </section>
       </main>
 
       <section class="panel bottom-panel">

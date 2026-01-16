@@ -270,6 +270,31 @@ body {
   flex-wrap: wrap;
 }
 
+.depth-toggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--panel-border);
+}
+
+.chip {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.chip.active {
+  color: var(--text);
+  background: rgba(244, 184, 96, 0.2);
+}
+
 .field-inline {
   display: inline-flex;
   align-items: center;
@@ -471,6 +496,12 @@ body {
   gap: 10px;
 }
 
+.wallet-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .ticket-foot {
   font-size: 0.8rem;
   color: var(--muted);
@@ -517,6 +548,22 @@ body {
   padding: 6px 10px;
   border-radius: 10px;
   font-size: 0.75rem;
+}
+
+.pulse {
+  animation: pulseGlow 0.9s ease-out;
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 rgba(244, 184, 96, 0);
+  }
+  30% {
+    box-shadow: 0 0 18px rgba(244, 184, 96, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(244, 184, 96, 0);
+  }
 }
 
 .table-row .tag {

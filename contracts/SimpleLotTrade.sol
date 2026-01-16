@@ -335,28 +335,26 @@ contract SimpleLotrade {
 
         uint256 lotsRemaining = o.lotsRemaining;
         uint256 valueRemaining = o.valueRemaining;
+        bool isBuy = o.isBuy;
+        int256 tick = o.tick;
+
+        _unlinkOrder(isBuy, tick, id);
+        _emitCanceled(id, msg.sender, isBuy, tick, lotsRemaining, valueRemaining);
+
+        delete orders[id];
 
         // Refund remaining escrow
-        if (o.isBuy) {
-            buyLevels[o.tick].totalLots -= lotsRemaining;
-            buyLevels[o.tick].totalValue -= valueRemaining;
+        if (isBuy) {
             bookEscrowTETC -= valueRemaining;
             bookAskTKN10K -= lotsRemaining;
 
             TETC.safeTransfer(msg.sender, valueRemaining);   // only after state updates
         } else {
-            sellLevels[o.tick].totalLots -= lotsRemaining;
-            sellLevels[o.tick].totalValue -= valueRemaining;
             bookAskTETC -= valueRemaining;
             bookEscrowTKN10K -= lotsRemaining;
 
             TKN10K.safeTransfer(msg.sender, lotsRemaining);   // only after state updates
         }
-
-        _unlinkOrder(o.isBuy, o.tick, id);
-        _emitCanceled(id, msg.sender, o.isBuy, o.tick, lotsRemaining, valueRemaining);
-
-        delete orders[id];
     }
 
     /* -------------------- Taker FOK -------------------- */
@@ -364,21 +362,23 @@ contract SimpleLotrade {
     function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) external nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestSellTick != NONE, "There are no sell orders on book");
-        require(lots <= bookEscrowTKN10K, "insufficient sell orders on book");
+        require(lots <= bookEscrowTKN10K, "insufficient escrowed TKN10K on book");
 
         TETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
 
         uint256 remain = lots;
         uint256 spent = 0;
+        uint256 price;
+        int256 tick;
 
         int256 t = bestSellTick;
-        int256 lastFilledTick;    // internal tracking, see lastTradeTick for global
 
         while (remain > 0) {
             require(t <= limitTick, "FOK");
             TickLevel storage lvl = sellLevels[t];
 
-            uint256 price = priceAtTick(t);
+            price = lvl.price;    // At this point either a trade happens at price or we advance and assign again
+            tick = t;             // Or we revert on FOK. These will always become last successful trade price/tick
 
             while (remain > 0) {
                 uint256 oid = lvl.head;
@@ -412,8 +412,6 @@ contract SimpleLotrade {
 
                 _emitTrade(oid, msg.sender, m.owner, true, t, price, f, pay, m.lotsRemaining, m.valueRemaining);
 
-                lastFilledTick = t;
-
                 if (m.lotsRemaining == 0) {
                     _removeHead(false, t);
                     delete orders[oid];
@@ -430,29 +428,38 @@ contract SimpleLotrade {
 
         require(remain == 0, "unfilled");
 
-        lastTradeTick = lastFilledTick;
-        lastTradePrice = priceAtTick(lastFilledTick);
         lastTradeBlock = block.number;
+        lastTradeTick = tick;
+        lastTradePrice = price;
+
+
+        // Refund any unspent TETC to taker
+        if (spent < maxTetcIn) {
+            TETC.safeTransfer(msg.sender, maxTetcIn - spent);
+        }
     }
 
     function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) external nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestBuyTick != NONE, "There are no buy orders on book");
-        require(minTetcOut <= bookEscrowTETC, "insufficient buy orders on book");
+        require(lots <= bookAskTKN10K, "insufficient asked TKN10K on book");
+        require(minTetcOut <= bookEscrowTETC, "insufficient escrowed TETC on book");
 
         TKN10K.safeTransferFrom(msg.sender, address(this), lots); // escrow TKN10K. reverts on insufficient balance/allowance
 
         uint256 remain = lots;
         uint256 got = 0;
+        uint256 price;
+        int256 tick;
 
         int256 t = bestBuyTick;
-        int256 lastFilledTick;     // internal tracking, see lastTradeTick for global
 
         while (remain > 0) {
             require(t >= limitTick, "FOK");
             TickLevel storage lvl = buyLevels[t];
 
-            uint256 price = priceAtTick(t);
+            price = lvl.price;    // At this point either a trade happens at price or we revert on FOK
+            tick = t;             // Inner loop does not modify. These always become last successful trade price/tick
 
             while (remain > 0) {
                 uint256 oid = lvl.head;
@@ -481,33 +488,29 @@ contract SimpleLotrade {
                 // Contract releases escrowed TETC to taker (seller) after state updates
                 TETC.safeTransfer(msg.sender, receiveAmt);
                 
-
-                _emitTrade(oid, msg.sender, m.owner, false, t, price, f, receiveAmt, m.lotsRemaining, m.valueRemaining);
-
-                lastFilledTick = t;
+                _emitTrade(oid, msg.sender, m.owner, false, tick, price, f, receiveAmt, m.lotsRemaining, m.valueRemaining);
 
                 if (m.lotsRemaining == 0) {
-                    _removeHead(true, t);
+                    _removeHead(true, tick);
                     delete orders[oid];
                 }
             }
 
             if (lvl.head == 0) {
                 int256 nxt = lvl.next;
-                _removeTick(true, t);
+                _removeTick(true, tick);
                 if (nxt == NONE) break;
                 t = nxt;
             }
         }
 
         require(remain == 0, "unfilled");
-
-        // Slippage guard: total quote received cannot be less than minTetcOut
         require(got >= minTetcOut, "slippage");
 
-        lastTradeTick = lastFilledTick;
-        lastTradePrice = priceAtTick(lastFilledTick);
+        lastTradeTick = tick;
+        lastTradePrice = price;
         lastTradeBlock = block.number;
+
     }
 
     /* -------------------- Internals: Orders / Levels -------------------- */

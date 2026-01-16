@@ -17,6 +17,7 @@ const ABI = [
   "function getTopOfBook() view returns (int256 bestBuyTick,uint256 buyLots,uint256 buyOrders,int256 bestSellTick,uint256 sellLots,uint256 sellOrders)",
   "function getEscrowTotals() view returns (uint256 buyTETC,uint256 sellTKN10K)",
   "function priceAtTick(int256 tick) view returns (uint256)",
+  "function cancel(uint256 id)",
   "function placeBuy(int256 tick,uint256 lots) returns (uint256)",
   "function placeSell(int256 tick,uint256 lots) returns (uint256)"
 ];
@@ -35,7 +36,9 @@ const el = {
   statusPill: document.getElementById("status-pill"),
   chainStatus: document.getElementById("chain-status"),
   connectBtn: document.getElementById("connect-btn"),
+  copyBtn: document.getElementById("copy-btn"),
   depthInput: document.getElementById("depth-input"),
+  depthToggle: document.getElementById("depth-toggle"),
   refreshBtn: document.getElementById("refresh-btn"),
   seedBtn: document.getElementById("seed-btn"),
   clearBtn: document.getElementById("clear-btn"),
@@ -46,6 +49,7 @@ const el = {
   bestBid: document.getElementById("best-bid"),
   bestAsk: document.getElementById("best-ask"),
   emptyBanner: document.getElementById("empty-banner"),
+  lastTradeStat: document.getElementById("last-trade-stat"),
   lastTrade: document.getElementById("last-trade"),
   escrowTotals: document.getElementById("escrow-totals"),
   midPrice: document.getElementById("mid-price"),
@@ -62,6 +66,8 @@ const el = {
   previewValue: document.getElementById("preview-value"),
   previewBtn: document.getElementById("preview-btn"),
   placeBtn: document.getElementById("place-btn"),
+  addTetc: document.getElementById("add-tetc"),
+  addTkn10k: document.getElementById("add-tkn10k"),
   ticketStatus: document.getElementById("ticket-status")
 };
 
@@ -77,6 +83,7 @@ const state = {
   side: "buy",
   demoMode: false,
   lastTradeTick: null,
+  lastTradeBlock: null,
   tape: [],
   readSource: "rpc",
   readChainId: null
@@ -127,6 +134,27 @@ function setTicketStatus(text) {
   el.ticketStatus.textContent = text;
 }
 
+function pulse(elm) {
+  if (!elm) return;
+  elm.classList.remove("pulse");
+  void elm.offsetWidth;
+  elm.classList.add("pulse");
+}
+
+function updateDepthToggle(value) {
+  if (!el.depthToggle) return;
+  el.depthToggle.querySelectorAll(".chip").forEach((chip) => {
+    const depth = Number(chip.dataset.depth);
+    chip.classList.toggle("active", depth === value);
+  });
+}
+
+function setDepth(value) {
+  el.depthInput.value = String(value);
+  updateDepthToggle(value);
+  refresh();
+}
+
 function setDemoMode(reason) {
   state.demoMode = true;
   setStatus("Demo mode", false);
@@ -159,6 +187,67 @@ function renderDemo() {
   renderOrders(buildDemoOrders(), buildDemoOrders(true));
   updateChart(buy, sell);
   el.lastUpdate.textContent = `Last update: demo`;
+}
+
+async function addTokenToWallet(address, fallbackSymbol, fallbackDecimals) {
+  if (!window.ethereum) {
+    setTicketStatus("No injected wallet found.");
+    return;
+  }
+  if (!address) {
+    setTicketStatus("Token address missing.");
+    return;
+  }
+  let symbol = fallbackSymbol;
+  let decimals = fallbackDecimals;
+  try {
+    const token =
+      address.toLowerCase() === TETC_ADDRESS.toLowerCase()
+        ? state.tetc
+        : address.toLowerCase() === TKN10K_ADDRESS.toLowerCase()
+          ? state.tkn10k
+          : new ethers.Contract(address, ERC20_ABI, state.readProvider);
+    if (token) {
+      const [sym, dec] = await Promise.all([token.symbol(), token.decimals()]);
+      symbol = sym || symbol;
+      decimals = Number(dec);
+    }
+  } catch (err) {
+    console.warn("Token metadata lookup failed:", err);
+  }
+  try {
+    const added = await window.ethereum.request({
+      method: "wallet_watchAsset",
+      params: {
+        type: "ERC20",
+        options: {
+          address,
+          symbol,
+          decimals
+        }
+      }
+    });
+    setTicketStatus(added ? `${symbol} added to MetaMask.` : "Token not added.");
+  } catch (err) {
+    setTicketStatus(`Add token failed: ${err.message || err}`);
+  }
+}
+
+async function copyAddresses() {
+  const lines = [
+    `TETC=${TETC_ADDRESS || "-"}`,
+    `TKN10K=${TKN10K_ADDRESS || "-"}`,
+    `SimpleLotTrade=${CONTRACT_ADDRESS || "-"}`
+  ];
+  const text = lines.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    setTicketStatus("Addresses copied to clipboard.");
+  } catch (err) {
+    console.warn("Clipboard failed:", err);
+    setTicketStatus("Copy failed. See console for addresses.");
+    console.log(text);
+  }
 }
 
 async function initProvider() {
@@ -430,15 +519,23 @@ async function refresh() {
     );
     el.liquidity.textContent = `${formatLots(totalLots)} lots`;
 
-    if (state.lastTradeTick !== null && state.lastTradeTick !== lastTradeTick) {
+    const hasTrade = lastTradeBlock !== 0n;
+    const tradeUpdated =
+      state.lastTradeBlock !== null &&
+      state.lastTradeBlock !== lastTradeBlock &&
+      hasTrade;
+    if (tradeUpdated) {
       state.tape.unshift({
         side: "trade",
         tick: lastTradeTick,
         price: lastTradePrice,
         lots: 1n
       });
+      pulse(el.lastTradeStat);
+      pulse(el.statusPill);
     }
     state.lastTradeTick = lastTradeTick;
+    state.lastTradeBlock = lastTradeBlock;
     renderTape();
 
     const ordersNote = !buyOrdersRes.ok || !sellOrdersRes.ok
@@ -617,10 +714,25 @@ async function seedOrders() {
 
 function bindEvents() {
   el.connectBtn.addEventListener("click", connectWallet);
+  if (el.copyBtn) {
+    el.copyBtn.addEventListener("click", copyAddresses);
+  }
+  if (el.addTetc) {
+    el.addTetc.addEventListener("click", () => addTokenToWallet(TETC_ADDRESS, "TETC", 18));
+  }
+  if (el.addTkn10k) {
+    el.addTkn10k.addEventListener("click", () => addTokenToWallet(TKN10K_ADDRESS, "TKN10K", 0));
+  }
   el.refreshBtn.addEventListener("click", refresh);
   el.previewBtn.addEventListener("click", previewOrder);
   el.placeBtn.addEventListener("click", placeOrder);
-  el.depthInput.addEventListener("change", refresh);
+  el.depthInput.addEventListener("change", () => {
+    const value = Number(el.depthInput.value);
+    if (Number.isFinite(value)) {
+      updateDepthToggle(value);
+    }
+    refresh();
+  });
   el.seedBtn.addEventListener("click", seedOrders);
   el.clearBtn.addEventListener("click", clearMyOrders);
   el.openOrders.addEventListener("click", (event) => {
@@ -639,11 +751,22 @@ function bindEvents() {
       btn.classList.toggle("active", btn.dataset.side === side);
     });
   });
+
+  if (el.depthToggle) {
+    el.depthToggle.addEventListener("click", (event) => {
+      const chip = event.target.closest(".chip");
+      if (!chip) return;
+      const value = Number(chip.dataset.depth);
+      if (!Number.isFinite(value)) return;
+      setDepth(value);
+    });
+  }
 }
 
 async function boot() {
   bindEvents();
   el.depthInput.value = MAX_LEVELS_DEFAULT.toString();
+  updateDepthToggle(MAX_LEVELS_DEFAULT);
   el.seedBtn.disabled = true;
   el.clearBtn.disabled = true;
   try {
