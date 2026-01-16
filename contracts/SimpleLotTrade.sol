@@ -288,7 +288,7 @@ contract SimpleLotrade {
     /* -------------------- Maker Orders (escrow on placement) -------------------- */
 
     function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
-        require(lots > 0 && lots < MAX_LOTS, "invalid lots");
+        require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         require(bestSellTick == NONE || bestSellTick > tick, "crossing sell book -- consider takeBuyFOK");
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
@@ -309,7 +309,7 @@ contract SimpleLotrade {
     }
 
     function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
-        require(lots > 0 && lots < MAX_LOTS, "invalid lots");
+        require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         require(bestBuyTick == NONE || bestBuyTick < tick, "crossing buy book -- consider takeSellFOK");
         require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
 
