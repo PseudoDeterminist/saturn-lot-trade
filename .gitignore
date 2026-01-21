@@ -24,5 +24,8 @@ out/
 
 # core-geth files
 chaindata/
+
 hardhat-node.log
+Compare.sol
+tokens/
 

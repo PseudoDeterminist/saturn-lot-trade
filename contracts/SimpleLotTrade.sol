@@ -15,17 +15,18 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract SimpleLotrade {
     using SafeERC20 for IERC20;
     // Tick range: -464 .. +1855 (5 decades * 464 ticks/decade)
-    int256 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
-    int256 private constant MAX_TICK =  1855; // 9950 TETC per lot; 0.995 TETC per TKN
-    uint256 private constant MAX_LOTS = 100000;
+    int32 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
+    int32 private constant MAX_TICK = 1855; // 9950 TETC per lot; 0.995 TETC per TKN
+    uint32 private constant MAX_LOTS = 100000;
 
-    int256 private constant NONE = type(int256).min;
+    int32 private constant NONE_TICK = type(int32).min;
+    int256 private constant NONE = int256(NONE_TICK);
 
     IERC20 public immutable TETC;    // quote token (18 decimals)
     IERC20 public immutable TKN10K;  // base token (0 decimals, integer lots)
 
     // Event integrity chain (increments once per emitted event)
-    uint256 public historySeq;
+    uint64 public historySeq;
     bytes32 public historyHash;
 
     // Oracle
@@ -42,7 +43,7 @@ contract SimpleLotrade {
     uint256 public bookAskTETC;        // total TETC asked in sell orders
 
     // Reentrancy guard (token transfers)
-    uint256 private _lock = 1;
+    uint8 private _lock = 1;
     modifier nonReentrant() {
         require(_lock == 1, "reentrancy");
         _lock = 2;
@@ -58,71 +59,69 @@ contract SimpleLotrade {
     uint8 private constant EVT_TRADE  = 3;
 
     event OrderPlaced(
-        uint256 indexed seq,
+        uint64 indexed seq,
         bytes32 indexed newHash,
-        uint256 indexed orderId,
+        uint64 indexed orderId,
         address owner,
         bool isBuy,
-        int256 tick,
-        uint256 lots,                   // if isBuy: TKN10K Ask placed; else TKN10K Escrowed
-        uint256 value                   // if isBuy: TETC Escrowed; else TETC Ask placed
+        int32 tick,
+        uint32 lots,                   // if isBuy: TKN10K Ask placed; else TKN10K Escrowed
+        uint128 value                  // if isBuy: TETC Escrowed; else TETC Ask placed
     );
 
     event OrderCanceled(
-        uint256 indexed seq,
+        uint64 indexed seq,
         bytes32 indexed newHash,
-        uint256 indexed orderId,
+        uint64 indexed orderId,
         address owner,
         bool isBuy,
-        int256 tick,
-        uint256 lotsCanceled,           // if isBuy: TKN10K Ask canceled; else TKN10K Escrow refunded
-        uint256 valueCanceled           // if isBuy: TETC Escrow refunded; else TETC Ask canceled
+        int32 tick,
+        uint32 lotsCanceled,           // if isBuy: TKN10K Ask canceled; else TKN10K Escrow refunded
+        uint128 valueCanceled          // if isBuy: TETC Escrow refunded; else TETC Ask canceled
     );
 
     // One Trade event per maker fill (FOK taker may generate multiple)
     event Trade(
-        uint256 indexed seq,
+        uint64 indexed seq,
         bytes32 indexed newHash,
-        uint256 indexed orderId,
+        uint64 indexed orderId,
         address taker,
         address maker,
         bool takerIsBuy,
-        int256 tick,
-        uint256 pricePerLot,
-        uint256 lotsFilled,
-        uint256 valueFilled,
-        uint256 lotsRemainingAfter,      // if maker.isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
-        uint256 valueRemainingAfter      // if maker.isBuy: TETC Escrow remaining; else TETC Ask remaining
+        int32 tick,
+        uint96 pricePerLot,
+        uint32 lotsFilled,
+        uint128 valueFilled,
+        uint32 lotsRemainingAfter,      // if maker.isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
+        uint128 valueRemainingAfter     // if maker.isBuy: TETC Escrow remaining; else TETC Ask remaining
     );
 
     /* -------------------- Order book data -------------------- */
 
     struct Order {
-        bool exists;
         address owner;
-        int256 tick;
-        uint256 lotsRemaining;           // if isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
-        uint256 valueRemaining;          // if isBuy: TETC Escrow remaining; else TETC Ask remaining
+        int32 tick;
+        uint32 lotsRemaining;           // if isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
         bool isBuy;
-        uint256 prev;
-        uint256 next;
+        uint128 valueRemaining;         // if isBuy: TETC Escrow remaining; else TETC Ask remaining
+        uint64 prev;
+        uint64 next;
     }
 
     struct TickLevel {
-        bool exists;
-        uint256 price;
-        int256 prev;
-        int256 next;
-        uint256 head;
-        uint256 tail;
-        uint256 orderCount;
-        uint256 totalLots;               // if buyLevel: TKN10K Ask total; else TKN10K Escrow total
-        uint256 totalValue;              // if buyLevel: TETC Escrow total; else TETC Ask total
+        uint96 price;
+        int32 prev;
+        int32 next;
+        uint32 orderCount;
+        uint64 head;
+        uint64 tail;
+        uint64 totalLots;               // if buyLevel: TKN10K Ask total; else TKN10K Escrow total
+        uint128 totalValue;             // if buyLevel: TETC Escrow total; else TETC Ask total
     }
 
-    uint256 public nextOrderId = 1;
+    uint64 public nextOrderId = 1;
 
-    mapping(uint256 => Order) public orders;
+    mapping(uint64 => Order) public orders;
     mapping(int256 => TickLevel) public buyLevels;
     mapping(int256 => TickLevel) public sellLevels;
 
@@ -183,7 +182,6 @@ contract SimpleLotrade {
         TKN10K = IERC20(tkn10kToken);
         bestBuyTick = NONE;
         bestSellTick = NONE;
-        // historySeq defaults to 0, historyHash defaults to 0x00..00
     }
 
     /* -------------------- Price -------------------- */
@@ -208,55 +206,80 @@ contract SimpleLotrade {
         result = factor * m;
     }
 
+    function _toTick(int256 tick) internal pure returns (int32) {
+        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
+        return int32(tick);
+    }
+
     /* -------------------- Hash chain helpers -------------------- */
 
-    function _chainHash(bytes32 recordHash) internal returns (bytes32) {
-        return historyHash = keccak256(abi.encodePacked(historyHash, recordHash));
+    function _chainHash(bytes32 chain, bytes32 recordHash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(chain, recordHash));
     }
 
     function _emitPlaced(
-        uint256 orderId,
+        uint64 seq,
+        bytes32 chain,
+        uint64 orderId,
         address owner,
         bool isBuy,
-        int256 tick,
-        uint256 lots,
-        uint256 value
-    ) internal {
-        ++historySeq;
-        bytes32 rec = keccak256(abi.encode(EVT_PLACE, historySeq, orderId, owner, isBuy, tick, lots, value));
-        emit OrderPlaced(historySeq, _chainHash(rec), orderId, owner, isBuy, tick, lots, value);
+        int32 tick,
+        uint32 lots,
+        uint128 value
+    ) internal returns (uint64, bytes32) {
+        unchecked {
+            ++seq;
+        }
+        bytes32 rec = keccak256(
+            abi.encode(EVT_PLACE, seq, orderId, owner, isBuy, tick, lots, value)
+        );
+        bytes32 newHash = _chainHash(chain, rec);
+        emit OrderPlaced(seq, newHash, orderId, owner, isBuy, tick, lots, value);
+        return (seq, newHash);
     }
 
     function _emitCanceled(
-        uint256 orderId,
+        uint64 seq,
+        bytes32 chain,
+        uint64 orderId,
         address owner,
         bool isBuy,
-        int256 tick,
-        uint256 lotsCanceled,
-        uint256 valueCanceled
-    ) internal {
-        ++historySeq;
-        bytes32 rec = keccak256(abi.encode(EVT_CANCEL, historySeq, orderId, owner, isBuy, tick, lotsCanceled, valueCanceled));
-        emit OrderCanceled(historySeq, _chainHash(rec), orderId, owner, isBuy, tick, lotsCanceled, valueCanceled);
+        int32 tick,
+        uint32 lotsCanceled,
+        uint128 valueCanceled
+    ) internal returns (uint64, bytes32) {
+        unchecked {
+            ++seq;
+        }
+        bytes32 rec = keccak256(
+            abi.encode(EVT_CANCEL, seq, orderId, owner, isBuy, tick, lotsCanceled, valueCanceled)
+        );
+        bytes32 newHash = _chainHash(chain, rec);
+        emit OrderCanceled(seq, newHash, orderId, owner, isBuy, tick, lotsCanceled, valueCanceled);
+        return (seq, newHash);
     }
 
     function _emitTrade(
-        uint256 orderId,
+        uint64 seq,
+        bytes32 chain,
+        uint64 orderId,
         address taker,
         address maker,
         bool takerIsBuy,
-        int256 tick,
-        uint256 pricePerLot,
-        uint256 lotsFilled,
-        uint256 valueFilled,
-        uint256 lotsRemainingAfter,
-        uint256 valueRemainingAfter
-    ) internal {
-        ++historySeq;
+        int32 tick,
+        uint96 pricePerLot,
+        uint32 lotsFilled,
+        uint128 valueFilled,
+        uint32 lotsRemainingAfter,
+        uint128 valueRemainingAfter
+    ) internal returns (uint64, bytes32) {
+        unchecked {
+            ++seq;
+        }
         bytes32 rec = keccak256(
             abi.encode(
                 EVT_TRADE,
-                historySeq,
+                seq,
                 orderId,
                 taker,
                 maker,
@@ -269,9 +292,10 @@ contract SimpleLotrade {
                 valueRemainingAfter
             )
         );
+        bytes32 newHash = _chainHash(chain, rec);
         emit Trade(
-            historySeq,
-            _chainHash(rec),
+            seq,
+            newHash,
             orderId,
             taker,
             maker,
@@ -283,63 +307,81 @@ contract SimpleLotrade {
             lotsRemainingAfter,
             valueRemainingAfter
         );
+        return (seq, newHash);
     }
 
     /* -------------------- Maker Orders (escrow on placement) -------------------- */
 
-    function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
+    function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
-        require(bestSellTick == NONE || bestSellTick > tick, "crossing sell book -- consider takeBuyFOK");
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
+        int32 t = _toTick(tick);
+        require(bestSellTick == NONE || bestSellTick > int256(t), "crossing sell book -- consider takeBuyFOK");
 
-        uint256 price = priceAtTick(tick);
-        uint256 cost = lots * price;
+        uint64 seq = historySeq;
+        bytes32 chain = historyHash;
+
+        uint32 lots32 = uint32(lots);
+        uint96 price = uint96(priceAtTick(tick));
+        uint256 cost = uint256(lots32) * uint256(price);
 
         // Escrow TETC in this contract
         TETC.safeTransferFrom(msg.sender, address(this), cost); // reverts on insufficient balance/allowance
 
-        id = _newOrder(true, tick, lots, cost);
-        _enqueue(true, tick, price, lots, cost, id);
+        id = _newOrder(true, t, lots32, uint128(cost));
+        _enqueue(true, t, price, lots32, uint128(cost), id);
 
         // Track buy escrow (global)
         bookEscrowTETC += cost;
-        bookAskTKN10K += lots;
+        bookAskTKN10K += lots32;
 
-        _emitPlaced(id, msg.sender, true, tick, lots, cost);
+        (seq, chain) = _emitPlaced(seq, chain, id, msg.sender, true, t, lots32, uint128(cost));
+        historySeq = seq;
+        historyHash = chain;
     }
 
-    function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint256 id) {
+    function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
-        require(bestBuyTick == NONE || bestBuyTick < tick, "crossing buy book -- consider takeSellFOK");
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "tick out of range");
+        int32 t = _toTick(tick);
+        require(bestBuyTick == NONE || bestBuyTick < int256(t), "crossing buy book -- consider takeSellFOK");
+
+        uint64 seq = historySeq;
+        bytes32 chain = historyHash;
 
         // Escrow TKN10K lots in this contract
-        TKN10K.safeTransferFrom(msg.sender, address(this), uint256(lots));  // reverts on insufficient balance/allowance
+        uint32 lots32 = uint32(lots);
+        TKN10K.safeTransferFrom(msg.sender, address(this), uint256(lots32));  // reverts on insufficient balance/allowance
 
-        uint256 price = priceAtTick(tick);
-        uint256 value = lots * price;
+        uint96 price = uint96(priceAtTick(tick));
+        uint256 value = uint256(lots32) * uint256(price);
 
-        id = _newOrder(false, tick, lots, value);
-        _enqueue(false, tick, price, lots, value, id);
+        id = _newOrder(false, t, lots32, uint128(value));
+        _enqueue(false, t, price, lots32, uint128(value), id);
 
         // Track sell escrow (global). Per-level is already totalLots.
-        bookEscrowTKN10K += lots;
+        bookEscrowTKN10K += lots32;
         bookAskTETC += value;
 
-        _emitPlaced(id, msg.sender, false, tick, lots, value);
+        (seq, chain) = _emitPlaced(seq, chain, id, msg.sender, false, t, lots32, uint128(value));
+        historySeq = seq;
+        historyHash = chain;
     }
 
-    function cancel(uint256 id) external nonReentrant {
+    function cancel(uint64 id) external nonReentrant {
         Order storage o = orders[id];
-        require(o.exists && o.owner == msg.sender, "not owner");
+        require(o.owner == msg.sender, "not owner");
 
-        uint256 lotsRemaining = o.lotsRemaining;
-        uint256 valueRemaining = o.valueRemaining;
+        uint64 seq = historySeq;
+        bytes32 chain = historyHash;
+
+        uint32 lotsRemaining = o.lotsRemaining;
+        uint128 valueRemaining = o.valueRemaining;
         bool isBuy = o.isBuy;
-        int256 tick = o.tick;
+        int32 tick = o.tick;
 
         _unlinkOrder(isBuy, tick, id);
-        _emitCanceled(id, msg.sender, isBuy, tick, lotsRemaining, valueRemaining);
+        (seq, chain) = _emitCanceled(seq, chain, id, msg.sender, isBuy, tick, lotsRemaining, valueRemaining);
+        historySeq = seq;
+        historyHash = chain;
 
         delete orders[id];
 
@@ -348,12 +390,12 @@ contract SimpleLotrade {
             bookEscrowTETC -= valueRemaining;
             bookAskTKN10K -= lotsRemaining;
 
-            TETC.safeTransfer(msg.sender, valueRemaining);   // only after state updates
+            TETC.safeTransfer(msg.sender, uint256(valueRemaining));   // only after state updates
         } else {
             bookAskTETC -= valueRemaining;
             bookEscrowTKN10K -= lotsRemaining;
 
-            TKN10K.safeTransfer(msg.sender, lotsRemaining);   // only after state updates
+            TKN10K.safeTransfer(msg.sender, uint256(lotsRemaining));   // only after state updates
         }
     }
 
@@ -366,10 +408,15 @@ contract SimpleLotrade {
 
         TETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
 
+        uint64 seq = historySeq;
+        bytes32 chain = historyHash;
+
         uint256 remain = lots;
         uint256 spent = 0;
-        uint256 price;
-        int256 tick;
+        uint96 price;
+
+        uint256 bookEscrowTkn = bookEscrowTKN10K;
+        uint256 bookAskTetc = bookAskTETC;
 
         int256 t = bestSellTick;
 
@@ -378,60 +425,97 @@ contract SimpleLotrade {
             TickLevel storage lvl = sellLevels[t];
 
             price = lvl.price;    // At this point either a trade happens at price or we advance and assign again
-            tick = t;             // Or we revert on FOK. These will always become last successful trade price/tick
+
+            uint64 head = lvl.head;
 
             while (remain > 0) {
-                uint256 oid = lvl.head;
+                uint64 oid = head;
                 if (oid == 0) break;
 
                 Order storage m = orders[oid];
-                uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
+                address maker = m.owner;
+                uint32 mLots = m.lotsRemaining;
+                uint32 fill = remain < mLots ? uint32(remain) : mLots;
+                mLots -= fill;
 
-                uint256 pay = f * price;
+                uint256 pay = uint256(fill) * uint256(price);
 
                 // Slippage guard: total quote spent cannot exceed maxTetcIn
                 spent += pay;
                 require(spent <= maxTetcIn, "slippage");
 
                 // Update balances
-                m.lotsRemaining -= f;
-                m.valueRemaining -= pay;
+                uint128 remainingValue;
+                if (mLots == 0) {
+                    head = m.next;
+                    unchecked {
+                        lvl.orderCount--;
+                    }
+                    delete orders[oid];
+                    if (head == 0) {
+                        lvl.tail = 0;
+                    }
+                    remainingValue = 0;
+                } else {
+                    remainingValue = m.valueRemaining - uint128(pay);
+                    m.lotsRemaining = mLots;
+                    m.valueRemaining = remainingValue;
+                }
 
-                lvl.totalLots -= f;
-                bookEscrowTKN10K -= f;
-                lvl.totalValue -= pay;
-                bookAskTETC -= pay;
+                lvl.totalLots -= fill;
+                lvl.totalValue -= uint128(pay);
+                bookEscrowTkn -= fill;
+                bookAskTetc -= pay;
 
-                remain -= f;
+                remain -= fill;
 
                 // Contract delivers TETC to maker (seller) after state updates
-                TETC.safeTransfer(m.owner, pay);
+                TETC.safeTransfer(maker, pay);
 
                 // Contract releases escrowed TKN10K to taker (buyer) after state updates
-                TKN10K.safeTransfer(msg.sender, f);
+                TKN10K.safeTransfer(msg.sender, uint256(fill));
 
-                _emitTrade(oid, msg.sender, m.owner, true, t, price, f, pay, m.lotsRemaining, m.valueRemaining);
-
-                if (m.lotsRemaining == 0) {
-                    _removeHead(false, t);
-                    delete orders[oid];
-                }
+                (seq, chain) = _emitTrade(
+                    seq,
+                    chain,
+                    oid,
+                    msg.sender,
+                    maker,
+                    true,
+                    int32(t),
+                    price,
+                    fill,
+                    uint128(pay),
+                    mLots,
+                    remainingValue
+                );
             }
 
-            if (lvl.head == 0) {
-                int256 nxt = lvl.next;
-                _removeTick(false, t);
-                if (nxt == NONE) break;
-                t = nxt;
+            if (head == 0) {
+                int32 nxt = lvl.next;
+                _removeTick(false, int32(t));
+                if (remain == 0) break;
+                if (nxt == NONE_TICK) break;
+                t = int256(nxt);
+            } else {
+                if (head != lvl.head) {
+                    lvl.head = head;
+                    orders[head].prev = 0;
+                }
             }
         }
 
         require(remain == 0, "unfilled");
 
-        lastTradeBlock = block.number;
-        lastTradeTick = tick;
-        lastTradePrice = price;
+        bookEscrowTKN10K = bookEscrowTkn;
+        bookAskTETC = bookAskTetc;
 
+        historySeq = seq;
+        historyHash = chain;
+
+        lastTradeBlock = block.number;
+        lastTradeTick = t;
+        lastTradePrice = price;
 
         // Refund any unspent TETC to taker
         if (spent < maxTetcIn) {
@@ -447,10 +531,15 @@ contract SimpleLotrade {
 
         TKN10K.safeTransferFrom(msg.sender, address(this), lots); // escrow TKN10K. reverts on insufficient balance/allowance
 
+        uint64 seq = historySeq;
+        bytes32 chain = historyHash;
+
         uint256 remain = lots;
         uint256 got = 0;
-        uint256 price;
-        int256 tick;
+        uint96 price;
+
+        uint256 bookAskTkn = bookAskTKN10K;
+        uint256 bookEscrowTetc = bookEscrowTETC;
 
         int256 t = bestBuyTick;
 
@@ -459,55 +548,93 @@ contract SimpleLotrade {
             TickLevel storage lvl = buyLevels[t];
 
             price = lvl.price;    // At this point either a trade happens at price or we revert on FOK
-            tick = t;             // Inner loop does not modify. These always become last successful trade price/tick
+
+            uint64 head = lvl.head;
 
             while (remain > 0) {
-                uint256 oid = lvl.head;
+                uint64 oid = head;
                 if (oid == 0) break;
 
                 Order storage m = orders[oid];
-                uint256 f = m.lotsRemaining > remain ? remain : m.lotsRemaining;
+                address maker = m.owner;
+                uint32 mLots = m.lotsRemaining;
+                uint32 fill = remain < mLots ? uint32(remain) : mLots;
+                mLots -= fill;
 
-                uint256 receiveAmt = f * price;
+                uint256 receiveAmt = uint256(fill) * uint256(price);
                 got += receiveAmt;
 
                 // Update balances
-                m.lotsRemaining -= f;
-                m.valueRemaining -= receiveAmt;
+                uint128 remainingValue;
+                if (mLots == 0) {
+                    head = m.next;
+                    unchecked {
+                        lvl.orderCount--;
+                    }
+                    delete orders[oid];
+                    if (head == 0) {
+                        lvl.tail = 0;
+                    }
+                    remainingValue = 0;
+                } else {
+                    remainingValue = m.valueRemaining - uint128(receiveAmt);
+                    m.lotsRemaining = mLots;
+                    m.valueRemaining = remainingValue;
+                }
 
-                lvl.totalLots -= f;
-                bookAskTKN10K -= f;
-                lvl.totalValue -= receiveAmt;
-                bookEscrowTETC -= receiveAmt;
+                lvl.totalLots -= fill;
+                lvl.totalValue -= uint128(receiveAmt);
+                bookAskTkn -= fill;
+                bookEscrowTetc -= receiveAmt;
 
-                remain -= f;
+                remain -= fill;
 
                 // Contract delivers TKN10K to maker (buyer) after state updates
-                TKN10K.safeTransfer(m.owner, f);
+                TKN10K.safeTransfer(maker, uint256(fill));
 
                 // Contract releases escrowed TETC to taker (seller) after state updates
                 TETC.safeTransfer(msg.sender, receiveAmt);
                 
-                _emitTrade(oid, msg.sender, m.owner, false, tick, price, f, receiveAmt, m.lotsRemaining, m.valueRemaining);
-
-                if (m.lotsRemaining == 0) {
-                    _removeHead(true, tick);
-                    delete orders[oid];
-                }
+                (seq, chain) = _emitTrade(
+                    seq,
+                    chain,
+                    oid,
+                    msg.sender,
+                    maker,
+                    false,
+                    int32(t),
+                    price,
+                    fill,
+                    uint128(receiveAmt),
+                    mLots,
+                    remainingValue
+                );
             }
 
-            if (lvl.head == 0) {
-                int256 nxt = lvl.next;
-                _removeTick(true, tick);
-                if (nxt == NONE) break;
-                t = nxt;
+            if (head == 0) {
+                int32 nxt = lvl.next;
+                _removeTick(true, int32(t));
+                if (remain == 0) break;
+                if (nxt == NONE_TICK) break;
+                t = int256(nxt);
+            } else {
+                if (head != lvl.head) {
+                    lvl.head = head;
+                    orders[head].prev = 0;
+                }
             }
         }
 
         require(remain == 0, "unfilled");
         require(got >= minTetcOut, "slippage");
 
-        lastTradeTick = tick;
+        bookAskTKN10K = bookAskTkn;
+        bookEscrowTETC = bookEscrowTetc;
+
+        historySeq = seq;
+        historyHash = chain;
+
+        lastTradeTick = t;
         lastTradePrice = price;
         lastTradeBlock = block.number;
 
@@ -515,15 +642,15 @@ contract SimpleLotrade {
 
     /* -------------------- Internals: Orders / Levels -------------------- */
 
-    function _newOrder(bool isBuy, int256 tick, uint256 lots, uint256 value) internal returns (uint256 id) {
+    function _newOrder(bool isBuy, int32 tick, uint32 lots, uint128 value) internal returns (uint64 id) {
         id = nextOrderId++;
-        orders[id] = Order(true, msg.sender, tick, lots, value, isBuy, 0, 0);
+        orders[id] = Order(msg.sender, tick, lots, isBuy, value, 0, 0);
     }
 
-    function _enqueue(bool isBuy, int256 tick, uint256 price,uint256 lots, uint256 value, uint256 id) internal {
+    function _enqueue(bool isBuy, int32 tick, uint96 price, uint32 lots, uint128 value, uint64 id) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
 
-        if (!lvl.exists) {
+        if (lvl.price == 0) {
             _insertTick(isBuy, tick, price);
         }
 
@@ -536,60 +663,61 @@ contract SimpleLotrade {
             lvl.tail = id;
         }
 
-        lvl.orderCount++;
+        unchecked {
+            lvl.orderCount++;
+        }
         lvl.totalValue += value;
         lvl.totalLots += lots;
     }
 
-    function _insertTick(bool isBuy, int256 tick, uint256 price) internal {
+    function _insertTick(bool isBuy, int32 tick, uint96 price) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
-        lvl.exists = true;
         lvl.price = price;
-        lvl.prev = NONE;
-        lvl.next = NONE;
+        lvl.prev = NONE_TICK;
+        lvl.next = NONE_TICK;
 
         if (isBuy) {
             if (bestBuyTick == NONE) {
-                bestBuyTick = tick;
+                bestBuyTick = int256(tick);
                 return;
             }
             int256 cur = bestBuyTick;
             if (tick > cur) {
-                lvl.next = cur;
+                lvl.next = int32(cur);
                 buyLevels[cur].prev = tick;
-                bestBuyTick = tick;
+                bestBuyTick = int256(tick);
                 return;
             }
             while (true) {
-                int256 nxt = buyLevels[cur].next;
-                if (nxt == NONE || tick > nxt) {
-                    lvl.prev = cur;
+                int32 nxt = buyLevels[cur].next;
+                if (nxt == NONE_TICK || tick > nxt) {
+                    lvl.prev = int32(cur);
                     lvl.next = nxt;
                     buyLevels[cur].next = tick;
-                    if (nxt != NONE) buyLevels[nxt].prev = tick;
+                    if (nxt != NONE_TICK) buyLevels[nxt].prev = tick;
                     return;
                 }
                 cur = nxt;
             }
         } else {
             if (bestSellTick == NONE) {
-                bestSellTick = tick;
+                bestSellTick = int256(tick);
                 return;
             }
             int256 cur = bestSellTick;
             if (tick < cur) {
-                lvl.next = cur;
+                lvl.next = int32(cur);
                 sellLevels[cur].prev = tick;
-                bestSellTick = tick;
+                bestSellTick = int256(tick);
                 return;
             }
             while (true) {
-                int256 nxt = sellLevels[cur].next;
-                if (nxt == NONE || tick < nxt) {
-                    lvl.prev = cur;
+                int32 nxt = sellLevels[cur].next;
+                if (nxt == NONE_TICK || tick < nxt) {
+                    lvl.prev = int32(cur);
                     lvl.next = nxt;
                     sellLevels[cur].next = tick;
-                    if (nxt != NONE) sellLevels[nxt].prev = tick;
+                    if (nxt != NONE_TICK) sellLevels[nxt].prev = tick;
                     return;
                 }
                 cur = nxt;
@@ -597,17 +725,7 @@ contract SimpleLotrade {
         }
     }
 
-    function _removeHead(bool isBuy, int256 tick) internal {
-        TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
-        uint256 id = lvl.head;
-        uint256 n = orders[id].next;
-        lvl.head = n;
-        if (n == 0) lvl.tail = 0;
-        else orders[n].prev = 0;
-        lvl.orderCount--;
-    }
-
-    function _unlinkOrder(bool isBuy, int256 tick, uint256 id) internal {
+    function _unlinkOrder(bool isBuy, int32 tick, uint64 id) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         Order storage o = orders[id];
 
@@ -617,26 +735,28 @@ contract SimpleLotrade {
         if (o.next == 0) lvl.tail = o.prev;
         else orders[o.next].prev = o.prev;
 
-        lvl.orderCount--;
+        unchecked {
+            lvl.orderCount--;
+        }
         lvl.totalLots -= o.lotsRemaining;
         lvl.totalValue -= o.valueRemaining;
         if (lvl.head == 0) _removeTick(isBuy, tick);
     }
 
-    function _removeTick(bool isBuy, int256 tick) internal {
+    function _removeTick(bool isBuy, int32 tick) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
-        int256 p = lvl.prev;
-        int256 n = lvl.next;
+        int32 p = lvl.prev;
+        int32 n = lvl.next;
 
         if (isBuy) {
-            if (p == NONE) bestBuyTick = n;
+            if (p == NONE_TICK) bestBuyTick = int256(n);
             else buyLevels[p].next = n;
-            if (n != NONE) buyLevels[n].prev = p;
+            if (n != NONE_TICK) buyLevels[n].prev = p;
             delete buyLevels[tick];
         } else {
-            if (p == NONE) bestSellTick = n;
+            if (p == NONE_TICK) bestSellTick = int256(n);
             else sellLevels[p].next = n;
-            if (n != NONE) sellLevels[n].prev = p;
+            if (n != NONE_TICK) sellLevels[n].prev = p;
             delete sellLevels[tick];
         }
     }
@@ -711,7 +831,7 @@ contract SimpleLotrade {
 
         while (t != NONE && n < maxOrders) {
             TickLevel storage lvl = isBuy ? buyLevels[t] : sellLevels[t];
-            uint256 id = lvl.head;
+            uint64 id = lvl.head;
             uint256 price = lvl.price;
 
             while (id != 0 && n < maxOrders) {

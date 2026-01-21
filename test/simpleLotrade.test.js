@@ -7,7 +7,7 @@ const { ethers } = hardhat;
 const MIN_TICK = -464;
 const MAX_TICK = 1855;
 const MAX_LOTS = 100000n;
-const NONE = -(1n << 255n);
+const NONE = -(1n << 31n);
 
 const RNG_MOD = 1n << 64n;
 
@@ -42,7 +42,7 @@ async function assertBookInvariants(lotrade, orderIds, buyTicks, sellTicks) {
 
   for (const id of orderIds) {
     const o = await lotrade.orders(id);
-    if (!o.exists) continue;
+    if (o.owner === ethers.ZeroAddress) continue;
     expect(o.lotsRemaining).to.be.greaterThan(0n);
 
     const key = o.tick.toString();
@@ -86,14 +86,14 @@ async function assertBookInvariants(lotrade, orderIds, buyTicks, sellTicks) {
 
   for (const entry of perBuy.values()) {
     const lvl = await lotrade.buyLevels(entry.tick);
-    expect(lvl.exists).to.equal(true);
+    expect(lvl.price).to.be.greaterThan(0n);
     expect(lvl.totalLots).to.equal(entry.lots);
     expect(lvl.totalValue).to.equal(entry.value);
     expect(lvl.orderCount).to.equal(entry.count);
   }
   for (const entry of perSell.values()) {
     const lvl = await lotrade.sellLevels(entry.tick);
-    expect(lvl.exists).to.equal(true);
+    expect(lvl.price).to.be.greaterThan(0n);
     expect(lvl.totalLots).to.equal(entry.lots);
     expect(lvl.totalValue).to.equal(entry.value);
     expect(lvl.orderCount).to.equal(entry.count);
@@ -103,14 +103,14 @@ async function assertBookInvariants(lotrade, orderIds, buyTicks, sellTicks) {
     const key = tick.toString();
     if (!perBuy.has(key)) {
       const lvl = await lotrade.buyLevels(tick);
-      expect(lvl.exists).to.equal(false);
+      expect(lvl.price).to.equal(0n);
     }
   }
   for (const tick of sellTicks) {
     const key = tick.toString();
     if (!perSell.has(key)) {
       const lvl = await lotrade.sellLevels(tick);
-      expect(lvl.exists).to.equal(false);
+      expect(lvl.price).to.equal(0n);
     }
   }
 }
@@ -323,7 +323,7 @@ describe("SimpleLotrade", function () {
 
     const order1 = await lotrade.orders(id1);
     const order2 = await lotrade.orders(id2);
-    expect(order1.exists).to.equal(false);
+    expect(order1.owner).to.equal(ethers.ZeroAddress);
     expect(order2.lotsRemaining).to.equal(2n);
 
     expect(await lotrade.bestSellTick()).to.equal(1n);
@@ -469,7 +469,7 @@ describe("SimpleLotrade", function () {
           if (orderIds.length > 0) {
             const id = orderIds[randIndex(nextRand, orderIds.length)];
             const o = await lotrade.orders(id);
-            if (o.exists && o.owner === actor.address) {
+            if (o.owner !== ethers.ZeroAddress && o.owner === actor.address) {
               await lotrade.connect(actor).cancel(id);
               didWork = true;
             }
@@ -592,6 +592,187 @@ describe("SimpleLotrade", function () {
     await expect(lotrade.connect(alice).placeBuy(tick, lots)).to.be.revertedWith(
       "reentrancy"
     );
+  });
+});
+
+describe("Gas metrics", function () {
+  const GAS_PRICE = ethers.parseUnits("1", "gwei");
+  const GAS_OVERRIDES = { type: 0, gasPrice: GAS_PRICE };
+
+  async function gasUsedFor(txPromise) {
+    const tx = await txPromise;
+    const receipt = await tx.wait();
+    return receipt.gasUsed;
+  }
+
+  function logGas(label, gasUsed) {
+    const costWei = gasUsed * GAS_PRICE;
+    const costGwei = ethers.formatUnits(costWei, "gwei");
+    console.log(`${label}: gasUsed=${gasUsed} cost=${costGwei} gwei`);
+  }
+
+  it("logs maker gas for placeBuy and placeSell", async () => {
+    const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+
+    const buyTick = 0;
+    const sellTick = 1;
+    const lots = 1n;
+
+    const buyPrice = await lotrade.priceAtTick(buyTick);
+    const buyCost = buyPrice * lots;
+    await tetc.connect(alice).approve(lotrade, buyCost * 2n);
+    await lotrade.connect(alice).placeBuy(buyTick, lots, GAS_OVERRIDES);
+    const gasPlaceBuy = await gasUsedFor(
+      lotrade.connect(alice).placeBuy(buyTick, lots, GAS_OVERRIDES)
+    );
+    logGas("placeBuy (1 lot, warmed)", gasPlaceBuy);
+
+    await tkn.connect(bob).approve(lotrade, lots * 2n);
+    await lotrade.connect(bob).placeSell(sellTick, lots, GAS_OVERRIDES);
+    const gasPlaceSell = await gasUsedFor(
+      lotrade.connect(bob).placeSell(sellTick, lots, GAS_OVERRIDES)
+    );
+    logGas("placeSell (1 lot, warmed)", gasPlaceSell);
+
+    expect(gasPlaceBuy).to.be.greaterThan(0n);
+    expect(gasPlaceSell).to.be.greaterThan(0n);
+  });
+
+  it("logs taker gas for takeBuyFOK single vs 100 orders (single tick + 100 ticks)", async () => {
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const tick = 0;
+      const lots = 1n;
+
+      await tkn.connect(alice).approve(lotrade, lots);
+      await lotrade.connect(alice).placeSell(tick, lots);
+
+      const price = await lotrade.priceAtTick(tick);
+      const maxTetcIn = price * lots;
+      await tetc.connect(bob).approve(lotrade, maxTetcIn);
+      const gasUsed = await gasUsedFor(
+        lotrade.connect(bob).takeBuyFOK(tick, lots, maxTetcIn, GAS_OVERRIDES)
+      );
+      logGas("takeBuyFOK single order", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
+
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const orders = 100;
+      const tick = 0;
+      const lotsPerOrder = 1n;
+      const price = await lotrade.priceAtTick(tick);
+      const maxTetcIn = price * BigInt(orders);
+
+      await tkn.connect(alice).approve(lotrade, BigInt(orders));
+      for (let i = 0; i < orders; i++) {
+        await lotrade.connect(alice).placeSell(tick, lotsPerOrder);
+      }
+
+      await tetc.connect(bob).approve(lotrade, maxTetcIn);
+      const gasUsed = await gasUsedFor(
+        lotrade
+          .connect(bob)
+          .takeBuyFOK(tick, BigInt(orders), maxTetcIn, GAS_OVERRIDES)
+      );
+      logGas("takeBuyFOK 100 orders single tick", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
+
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const orders = 100;
+      const lotsPerOrder = 1n;
+      let maxTetcIn = 0n;
+
+      await tkn.connect(alice).approve(lotrade, BigInt(orders));
+      for (let i = 0; i < orders; i++) {
+        const tick = i;
+        await lotrade.connect(alice).placeSell(tick, lotsPerOrder);
+        const price = await lotrade.priceAtTick(tick);
+        maxTetcIn += price * lotsPerOrder;
+      }
+
+      await tetc.connect(bob).approve(lotrade, maxTetcIn);
+      const gasUsed = await gasUsedFor(
+        lotrade
+          .connect(bob)
+          .takeBuyFOK(orders - 1, BigInt(orders), maxTetcIn, GAS_OVERRIDES)
+      );
+      logGas("takeBuyFOK 100 orders across 100 ticks", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
+  });
+
+  it("logs taker gas for takeSellFOK single vs 100 orders (single tick + 100 ticks)", async () => {
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const tick = 0;
+      const lots = 1n;
+
+      const price = await lotrade.priceAtTick(tick);
+      await tetc.connect(alice).approve(lotrade, price * lots);
+      await lotrade.connect(alice).placeBuy(tick, lots);
+
+      await tkn.connect(bob).approve(lotrade, lots);
+      const gasUsed = await gasUsedFor(
+        lotrade.connect(bob).takeSellFOK(tick, lots, price * lots, GAS_OVERRIDES)
+      );
+      logGas("takeSellFOK single order", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
+
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const orders = 100;
+      const tick = 0;
+      const lotsPerOrder = 1n;
+      const price = await lotrade.priceAtTick(tick);
+      const minTetcOut = price * BigInt(orders);
+
+      await tetc.connect(alice).approve(lotrade, minTetcOut);
+      for (let i = 0; i < orders; i++) {
+        await lotrade.connect(alice).placeBuy(tick, lotsPerOrder);
+      }
+
+      await tkn.connect(bob).approve(lotrade, BigInt(orders));
+      const gasUsed = await gasUsedFor(
+        lotrade
+          .connect(bob)
+          .takeSellFOK(tick, BigInt(orders), minTetcOut, GAS_OVERRIDES)
+      );
+      logGas("takeSellFOK 100 orders single tick", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
+
+    {
+      const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const orders = 100;
+      const lotsPerOrder = 1n;
+      let minTetcOut = 0n;
+
+      for (let i = 0; i < orders; i++) {
+        const tick = i;
+        const price = await lotrade.priceAtTick(tick);
+        minTetcOut += price * lotsPerOrder;
+      }
+
+      await tetc.connect(alice).approve(lotrade, minTetcOut);
+      for (let i = 0; i < orders; i++) {
+        const tick = i;
+        await lotrade.connect(alice).placeBuy(tick, lotsPerOrder);
+      }
+
+      await tkn.connect(bob).approve(lotrade, BigInt(orders));
+      const gasUsed = await gasUsedFor(
+        lotrade
+          .connect(bob)
+          .takeSellFOK(0, BigInt(orders), minTetcOut, GAS_OVERRIDES)
+      );
+      logGas("takeSellFOK 100 orders across 100 ticks", gasUsed);
+      expect(gasUsed).to.be.greaterThan(0n);
+    }
   });
 });
 

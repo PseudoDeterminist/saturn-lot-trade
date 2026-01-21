@@ -17,9 +17,9 @@ const ABI = [
   "function getTopOfBook() view returns (int256 bestBuyTick,uint256 buyLots,uint256 buyOrders,int256 bestSellTick,uint256 sellLots,uint256 sellOrders)",
   "function getEscrowTotals() view returns (uint256 buyTETC,uint256 sellTKN10K)",
   "function priceAtTick(int256 tick) view returns (uint256)",
-  "function cancel(uint256 id)",
-  "function placeBuy(int256 tick,uint256 lots) returns (uint256)",
-  "function placeSell(int256 tick,uint256 lots) returns (uint256)"
+  "function cancel(uint64 id)",
+  "function placeBuy(int256 tick,uint256 lots) returns (uint64)",
+  "function placeSell(int256 tick,uint256 lots) returns (uint64)"
 ];
 
 const ERC20_ABI = [
