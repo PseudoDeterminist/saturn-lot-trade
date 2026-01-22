@@ -15,15 +15,19 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract SaturnLotTrade {
     using SafeERC20 for IERC20;
     // Tick range: -464 .. +1855 (5 decades * 464 ticks/decade)
-    int32 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
-    int32 private constant MAX_TICK = 1855; // 9950 TETC per lot; 0.995 TETC per TKN
+    int32 private constant MIN_TICK = -464; // 0.1 WETC per lot; 0.00001 WETC per STRN
+    int32 private constant MAX_TICK = 1855; // 9950 WETC per lot; 0.995 WETC per STRN
     uint32 private constant MAX_LOTS = 100000;
 
     int32 private constant NONE_TICK = type(int32).min;
     int256 private constant NONE = int256(NONE_TICK);
 
-    IERC20 public immutable TETC;    // quote token (18 decimals)
-    IERC20 public immutable TKN10K;  // base token (0 decimals, integer lots)
+    IERC20 public immutable WETC;    // quote token (18 decimals)
+    IERC20 public immutable STRN10K;  // base token (0 decimals, integer lots)
+
+    uint256 private constant ETC_MAINNET_CHAIN_ID = 61;
+    address private constant ETC_MAINNET_WETC = 0x82A618305706B14e7bcf2592D4B9324A366b6dAd;
+    address private constant ETC_MAINNET_STRN10K = 0x7d35D3938c3b4446473a4ac29351Bd93694b5DEF;
 
     // Event integrity chain (increments once per emitted event)
     uint64 public historySeq;
@@ -37,10 +41,10 @@ contract SaturnLotTrade {
     int256 public bestSellTick;
 
     // Running escrow totals (resting maker escrows)
-    uint256 public bookEscrowTETC;     // total TETC Escrowed in buy orders
-    uint256 public bookEscrowTKN10K;   // total TKN10K Escrowed in sell orders
-    uint256 public bookAskTKN10K;      // total TKN10K asked in buy orders
-    uint256 public bookAskTETC;        // total TETC asked in sell orders
+    uint256 public bookEscrowWETC;     // total WETC Escrowed in buy orders
+    uint256 public bookEscrowSTRN10K;   // total STRN10K Escrowed in sell orders
+    uint256 public bookAskSTRN10K;      // total STRN10K asked in buy orders
+    uint256 public bookAskWETC;        // total WETC asked in sell orders
 
     // Reentrancy guard (token transfers)
     uint8 private _lock = 1;
@@ -65,8 +69,8 @@ contract SaturnLotTrade {
         address owner,
         bool isBuy,
         int32 tick,
-        uint32 lots,                   // if isBuy: TKN10K Ask placed; else TKN10K Escrowed
-        uint128 value                  // if isBuy: TETC Escrowed; else TETC Ask placed
+        uint32 lots,                   // if isBuy: STRN10K Ask placed; else STRN10K Escrowed
+        uint128 value                  // if isBuy: WETC Escrowed; else WETC Ask placed
     );
 
     event OrderCanceled(
@@ -76,8 +80,8 @@ contract SaturnLotTrade {
         address owner,
         bool isBuy,
         int32 tick,
-        uint32 lotsCanceled,           // if isBuy: TKN10K Ask canceled; else TKN10K Escrow refunded
-        uint128 valueCanceled          // if isBuy: TETC Escrow refunded; else TETC Ask canceled
+        uint32 lotsCanceled,           // if isBuy: STRN10K Ask canceled; else STRN10K Escrow refunded
+        uint128 valueCanceled          // if isBuy: WETC Escrow refunded; else WETC Ask canceled
     );
 
     // One Trade event per maker fill (FOK taker may generate multiple)
@@ -92,8 +96,8 @@ contract SaturnLotTrade {
         uint96 pricePerLot,
         uint32 lotsFilled,
         uint128 valueFilled,
-        uint32 lotsRemainingAfter,      // if maker.isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
-        uint128 valueRemainingAfter     // if maker.isBuy: TETC Escrow remaining; else TETC Ask remaining
+        uint32 lotsRemainingAfter,      // if maker.isBuy: STRN10K Ask remaining; else STRN10K Escrow remaining
+        uint128 valueRemainingAfter     // if maker.isBuy: WETC Escrow remaining; else WETC Ask remaining
     );
 
     /* -------------------- Order book data -------------------- */
@@ -101,9 +105,9 @@ contract SaturnLotTrade {
     struct Order {
         address owner;
         int32 tick;
-        uint32 lotsRemaining;           // if isBuy: TKN10K Ask remaining; else TKN10K Escrow remaining
+        uint32 lotsRemaining;           // if isBuy: STRN10K Ask remaining; else STRN10K Escrow remaining
         bool isBuy;
-        uint128 valueRemaining;         // if isBuy: TETC Escrow remaining; else TETC Ask remaining
+        uint128 valueRemaining;         // if isBuy: WETC Escrow remaining; else WETC Ask remaining
         uint64 prev;
         uint64 next;
     }
@@ -115,8 +119,8 @@ contract SaturnLotTrade {
         uint32 orderCount;
         uint64 head;
         uint64 tail;
-        uint64 totalLots;               // if buyLevel: TKN10K Ask total; else TKN10K Escrow total
-        uint128 totalValue;             // if buyLevel: TETC Escrow total; else TETC Ask total
+        uint64 totalLots;               // if buyLevel: STRN10K Ask total; else STRN10K Escrow total
+        uint128 totalValue;             // if buyLevel: WETC Escrow total; else WETC Ask total
     }
 
     uint64 public nextOrderId = 1;
@@ -129,8 +133,8 @@ contract SaturnLotTrade {
     struct BookLevel {
         int256 tick;
         uint256 price;
-        uint256 totalLots;               // if buyLevel: TKN10K Ask total; else TKN10K Escrow total
-        uint256 totalValue;              // if buyLevel: TETC Escrow total; else TETC Ask total
+        uint256 totalLots;               // if buyLevel: STRN10K Ask total; else STRN10K Escrow total
+        uint256 totalValue;              // if buyLevel: WETC Escrow total; else WETC Ask total
         uint256 orderCount;
     }
 
@@ -175,11 +179,16 @@ contract SaturnLotTrade {
         hex"2154217e21a921d421ff222a2256228122ad22d923062332235f238c23b923e7"
         hex"241524432471249f24ce24fd252c255b258b25bb25eb261b264b267c26ad26de";
 
-    constructor(address tetcToken, address tkn10kToken) {
-        require(tetcToken != address(0), "zero TETC");
-        require(tkn10kToken != address(0), "zero TKN10K");
-        TETC = IERC20(tetcToken);
-        TKN10K = IERC20(tkn10kToken);
+    constructor(address wetcToken, address strn10kToken) {
+        if (block.chainid == ETC_MAINNET_CHAIN_ID) {
+            WETC = IERC20(ETC_MAINNET_WETC);
+            STRN10K = IERC20(ETC_MAINNET_STRN10K);
+        } else {
+            require(wetcToken != address(0), "zero WETC");
+            require(strn10kToken != address(0), "zero STRN10K");
+            WETC = IERC20(wetcToken);
+            STRN10K = IERC20(strn10kToken);
+        }
         bestBuyTick = NONE;
         bestSellTick = NONE;
     }
@@ -197,11 +206,11 @@ contract SaturnLotTrade {
         uint256 m = (uint256(uint8(MANT[i])) << 8) | uint256(uint8(MANT[i + 1]));
 
         uint256 factor;
-        if (d == 0) factor = 1e14;       //    0.1 to      0.995 TETC per lot = 0.00001 to  0.0000995 TETC per Base TKN
-        else if (d == 1) factor = 1e15;  //      1 to      9.95  TETC per lot = 0.0001  to  0.000995  TETC per Base TKN
-        else if (d == 2) factor = 1e16;  //     10 to     99.5   TETC per lot = 0.001   to  0.00995   TETC per Base TKN
-        else if (d == 3) factor = 1e17;  //    100 to    995     TETC per lot = 0.01    to  0.0995    TETC per Base TKN
-        else factor = 1e18;              //   1000 to   9950     TETC per lot = 0.1     to  0.995     TETC per Base TKN
+        if (d == 0) factor = 1e14;       //    0.1 to      0.995 WETC per lot = 0.00001 to  0.0000995 WETC per Base STRN
+        else if (d == 1) factor = 1e15;  //      1 to      9.95  WETC per lot = 0.0001  to  0.000995  WETC per Base STRN
+        else if (d == 2) factor = 1e16;  //     10 to     99.5   WETC per lot = 0.001   to  0.00995   WETC per Base STRN
+        else if (d == 3) factor = 1e17;  //    100 to    995     WETC per lot = 0.01    to  0.0995    WETC per Base STRN
+        else factor = 1e18;              //   1000 to   9950     WETC per lot = 0.1     to  0.995     WETC per Base STRN
 
         result = factor * m;
     }
@@ -324,15 +333,15 @@ contract SaturnLotTrade {
         uint96 price = uint96(priceAtTick(tick));
         uint256 cost = uint256(lots32) * uint256(price);
 
-        // Escrow TETC in this contract
-        TETC.safeTransferFrom(msg.sender, address(this), cost); // reverts on insufficient balance/allowance
+        // Escrow WETC in this contract
+        WETC.safeTransferFrom(msg.sender, address(this), cost); // reverts on insufficient balance/allowance
 
         id = _newOrder(true, t, lots32, uint128(cost));
         _enqueue(true, t, price, lots32, uint128(cost), id);
 
         // Track buy escrow (global)
-        bookEscrowTETC += cost;
-        bookAskTKN10K += lots32;
+        bookEscrowWETC += cost;
+        bookAskSTRN10K += lots32;
 
         (seq, chain) = _emitPlaced(seq, chain, id, msg.sender, true, t, lots32, uint128(cost));
         historySeq = seq;
@@ -347,9 +356,9 @@ contract SaturnLotTrade {
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
 
-        // Escrow TKN10K lots in this contract
+        // Escrow STRN10K lots in this contract
         uint32 lots32 = uint32(lots);
-        TKN10K.safeTransferFrom(msg.sender, address(this), uint256(lots32));  // reverts on insufficient balance/allowance
+        STRN10K.safeTransferFrom(msg.sender, address(this), uint256(lots32));  // reverts on insufficient balance/allowance
 
         uint96 price = uint96(priceAtTick(tick));
         uint256 value = uint256(lots32) * uint256(price);
@@ -358,8 +367,8 @@ contract SaturnLotTrade {
         _enqueue(false, t, price, lots32, uint128(value), id);
 
         // Track sell escrow (global). Per-level is already totalLots.
-        bookEscrowTKN10K += lots32;
-        bookAskTETC += value;
+        bookEscrowSTRN10K += lots32;
+        bookAskWETC += value;
 
         (seq, chain) = _emitPlaced(seq, chain, id, msg.sender, false, t, lots32, uint128(value));
         historySeq = seq;
@@ -387,15 +396,15 @@ contract SaturnLotTrade {
 
         // Refund remaining escrow
         if (isBuy) {
-            bookEscrowTETC -= valueRemaining;
-            bookAskTKN10K -= lotsRemaining;
+            bookEscrowWETC -= valueRemaining;
+            bookAskSTRN10K -= lotsRemaining;
 
-            TETC.safeTransfer(msg.sender, uint256(valueRemaining));   // only after state updates
+            WETC.safeTransfer(msg.sender, uint256(valueRemaining));   // only after state updates
         } else {
-            bookAskTETC -= valueRemaining;
-            bookEscrowTKN10K -= lotsRemaining;
+            bookAskWETC -= valueRemaining;
+            bookEscrowSTRN10K -= lotsRemaining;
 
-            TKN10K.safeTransfer(msg.sender, uint256(lotsRemaining));   // only after state updates
+            STRN10K.safeTransfer(msg.sender, uint256(lotsRemaining));   // only after state updates
         }
     }
 
@@ -404,9 +413,9 @@ contract SaturnLotTrade {
     function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) external nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestSellTick != NONE, "There are no sell orders on book");
-        require(lots <= bookEscrowTKN10K, "insufficient escrowed TKN10K on book");
+        require(lots <= bookEscrowSTRN10K, "insufficient escrowed STRN10K on book");
 
-        TETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
+        WETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -415,8 +424,8 @@ contract SaturnLotTrade {
         uint256 spent = 0;
         uint96 price;
 
-        uint256 bookEscrowTkn = bookEscrowTKN10K;
-        uint256 bookAskTetc = bookAskTETC;
+        uint256 bookEscrowTkn = bookEscrowSTRN10K;
+        uint256 bookAskTetc = bookAskWETC;
 
         int256 t = bestSellTick;
 
@@ -469,11 +478,11 @@ contract SaturnLotTrade {
 
                 remain -= fill;
 
-                // Contract delivers TETC to maker (seller) after state updates
-                TETC.safeTransfer(maker, pay);
+                // Contract delivers WETC to maker (seller) after state updates
+                WETC.safeTransfer(maker, pay);
 
-                // Contract releases escrowed TKN10K to taker (buyer) after state updates
-                TKN10K.safeTransfer(msg.sender, uint256(fill));
+                // Contract releases escrowed STRN10K to taker (buyer) after state updates
+                STRN10K.safeTransfer(msg.sender, uint256(fill));
 
                 (seq, chain) = _emitTrade(
                     seq,
@@ -507,8 +516,8 @@ contract SaturnLotTrade {
 
         require(remain == 0, "unfilled");
 
-        bookEscrowTKN10K = bookEscrowTkn;
-        bookAskTETC = bookAskTetc;
+        bookEscrowSTRN10K = bookEscrowTkn;
+        bookAskWETC = bookAskTetc;
 
         historySeq = seq;
         historyHash = chain;
@@ -517,19 +526,19 @@ contract SaturnLotTrade {
         lastTradeTick = t;
         lastTradePrice = price;
 
-        // Refund any unspent TETC to taker
+        // Refund any unspent WETC to taker
         if (spent < maxTetcIn) {
-            TETC.safeTransfer(msg.sender, maxTetcIn - spent);
+            WETC.safeTransfer(msg.sender, maxTetcIn - spent);
         }
     }
 
     function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) external nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestBuyTick != NONE, "There are no buy orders on book");
-        require(lots <= bookAskTKN10K, "insufficient asked TKN10K on book");
-        require(minTetcOut <= bookEscrowTETC, "insufficient escrowed TETC on book");
+        require(lots <= bookAskSTRN10K, "insufficient asked STRN10K on book");
+        require(minTetcOut <= bookEscrowWETC, "insufficient escrowed WETC on book");
 
-        TKN10K.safeTransferFrom(msg.sender, address(this), lots); // escrow TKN10K. reverts on insufficient balance/allowance
+        STRN10K.safeTransferFrom(msg.sender, address(this), lots); // escrow STRN10K. reverts on insufficient balance/allowance
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -538,8 +547,8 @@ contract SaturnLotTrade {
         uint256 got = 0;
         uint96 price;
 
-        uint256 bookAskTkn = bookAskTKN10K;
-        uint256 bookEscrowTetc = bookEscrowTETC;
+        uint256 bookAskTkn = bookAskSTRN10K;
+        uint256 bookEscrowTetc = bookEscrowWETC;
 
         int256 t = bestBuyTick;
 
@@ -589,11 +598,11 @@ contract SaturnLotTrade {
 
                 remain -= fill;
 
-                // Contract delivers TKN10K to maker (buyer) after state updates
-                TKN10K.safeTransfer(maker, uint256(fill));
+                // Contract delivers STRN10K to maker (buyer) after state updates
+                STRN10K.safeTransfer(maker, uint256(fill));
 
-                // Contract releases escrowed TETC to taker (seller) after state updates
-                TETC.safeTransfer(msg.sender, receiveAmt);
+                // Contract releases escrowed WETC to taker (seller) after state updates
+                WETC.safeTransfer(msg.sender, receiveAmt);
                 
                 (seq, chain) = _emitTrade(
                     seq,
@@ -628,8 +637,8 @@ contract SaturnLotTrade {
         require(remain == 0, "unfilled");
         require(got >= minTetcOut, "slippage");
 
-        bookAskTKN10K = bookAskTkn;
-        bookEscrowTETC = bookEscrowTetc;
+        bookAskSTRN10K = bookAskTkn;
+        bookEscrowWETC = bookEscrowTetc;
 
         historySeq = seq;
         historyHash = chain;
@@ -874,7 +883,7 @@ contract SaturnLotTrade {
         return (bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock, lastTradePrice);
     }
 
-    function getEscrowTotals() external view returns (uint256 buyTETC, uint256 sellTKN10K) {
-        return (bookEscrowTETC, bookEscrowTKN10K);
+    function getEscrowTotals() external view returns (uint256 buyWETC, uint256 sellSTRN10K) {
+        return (bookEscrowWETC, bookEscrowSTRN10K);
     }
 }

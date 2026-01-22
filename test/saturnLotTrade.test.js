@@ -74,10 +74,10 @@ async function assertBookInvariants(lotrade, orderIds, buyTicks, sellTicks) {
     }
   }
 
-  expect(await lotrade.bookEscrowTETC()).to.equal(buyValue);
-  expect(await lotrade.bookAskTKN10K()).to.equal(buyLots);
-  expect(await lotrade.bookEscrowTKN10K()).to.equal(sellLots);
-  expect(await lotrade.bookAskTETC()).to.equal(sellValue);
+  expect(await lotrade.bookEscrowWETC()).to.equal(buyValue);
+  expect(await lotrade.bookAskSTRN10K()).to.equal(buyLots);
+  expect(await lotrade.bookEscrowSTRN10K()).to.equal(sellLots);
+  expect(await lotrade.bookAskWETC()).to.equal(sellValue);
 
   const onchainBestBuy = await lotrade.bestBuyTick();
   const onchainBestSell = await lotrade.bestSellTick();
@@ -332,7 +332,7 @@ describe("SaturnLotTrade", function () {
 
     const totals = await lotrade.getEscrowTotals();
     expect(totals[1]).to.equal(2n);
-    expect(await lotrade.bookAskTETC()).to.equal(price1 * 2n);
+    expect(await lotrade.bookAskWETC()).to.equal(price1 * 2n);
   });
 
   it("refunds unused quote in buy FOK", async () => {
@@ -392,8 +392,8 @@ describe("SaturnLotTrade", function () {
     const after = await tetc.balanceOf(alice.address);
 
     expect(after - before).to.equal(price * 6n);
-    expect(await lotrade.bookEscrowTETC()).to.equal(0n);
-    expect(await lotrade.bookAskTKN10K()).to.equal(0n);
+    expect(await lotrade.bookEscrowWETC()).to.equal(0n);
+    expect(await lotrade.bookAskSTRN10K()).to.equal(0n);
   });
 
   it("maintains book invariants under randomized actions (multi-seed)", async () => {
@@ -449,8 +449,8 @@ describe("SaturnLotTrade", function () {
             didWork = true;
           }
         } else if (action === 2) {
-          const available = await lotrade.bookEscrowTKN10K();
-          const maxTetcIn = await lotrade.bookAskTETC();
+          const available = await lotrade.bookEscrowSTRN10K();
+          const maxTetcIn = await lotrade.bookAskWETC();
           if (available > 0n && maxTetcIn > 0n) {
             const maxLots = available < 5n ? available : 5n;
             const lots = randBetween(nextRand, 1n, maxLots);
@@ -458,7 +458,7 @@ describe("SaturnLotTrade", function () {
             didWork = true;
           }
         } else if (action === 3) {
-          const available = await lotrade.bookAskTKN10K();
+          const available = await lotrade.bookAskSTRN10K();
           if (available > 0n) {
             const maxLots = available < 5n ? available : 5n;
             const lots = randBetween(nextRand, 1n, maxLots);
@@ -638,7 +638,7 @@ describe("Gas metrics", function () {
     expect(gasPlaceSell).to.be.greaterThan(0n);
   });
 
-  it("logs taker gas for takeBuyFOK single vs 100 orders (single tick + 100 ticks)", async () => {
+  it("logs taker gas for takeBuyFOK single vs 200 orders (single tick + 200 ticks)", async () => {
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
       const tick = 0;
@@ -659,7 +659,7 @@ describe("Gas metrics", function () {
 
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
-      const orders = 100;
+      const orders = 200;
       const tick = 0;
       const lotsPerOrder = 1n;
       const price = await lotrade.priceAtTick(tick);
@@ -676,13 +676,13 @@ describe("Gas metrics", function () {
           .connect(bob)
           .takeBuyFOK(tick, BigInt(orders), maxTetcIn, GAS_OVERRIDES)
       );
-      logGas("takeBuyFOK 100 orders single tick", gasUsed);
+      logGas("takeBuyFOK 200 orders single tick", gasUsed);
       expect(gasUsed).to.be.greaterThan(0n);
     }
 
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
-      const orders = 100;
+      const orders = 200;
       const lotsPerOrder = 1n;
       let maxTetcIn = 0n;
 
@@ -700,12 +700,12 @@ describe("Gas metrics", function () {
           .connect(bob)
           .takeBuyFOK(orders - 1, BigInt(orders), maxTetcIn, GAS_OVERRIDES)
       );
-      logGas("takeBuyFOK 100 orders across 100 ticks", gasUsed);
+      logGas("takeBuyFOK 200 orders across 200 ticks", gasUsed);
       expect(gasUsed).to.be.greaterThan(0n);
     }
   });
 
-  it("logs taker gas for takeSellFOK single vs 100 orders (single tick + 100 ticks)", async () => {
+  it("logs taker gas for takeSellFOK single vs 200 orders (single tick + 200 ticks)", async () => {
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
       const tick = 0;
@@ -725,7 +725,7 @@ describe("Gas metrics", function () {
 
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
-      const orders = 100;
+      const orders = 200;
       const tick = 0;
       const lotsPerOrder = 1n;
       const price = await lotrade.priceAtTick(tick);
@@ -742,13 +742,13 @@ describe("Gas metrics", function () {
           .connect(bob)
           .takeSellFOK(tick, BigInt(orders), minTetcOut, GAS_OVERRIDES)
       );
-      logGas("takeSellFOK 100 orders single tick", gasUsed);
+      logGas("takeSellFOK 200 orders single tick", gasUsed);
       expect(gasUsed).to.be.greaterThan(0n);
     }
 
     {
       const { lotrade, tetc, tkn, alice, bob } = await loadFixture(deployFixture);
-      const orders = 100;
+      const orders = 200;
       const lotsPerOrder = 1n;
       let minTetcOut = 0n;
 
@@ -770,7 +770,7 @@ describe("Gas metrics", function () {
           .connect(bob)
           .takeSellFOK(0, BigInt(orders), minTetcOut, GAS_OVERRIDES)
       );
-      logGas("takeSellFOK 100 orders across 100 ticks", gasUsed);
+      logGas("takeSellFOK 200 orders across 200 ticks", gasUsed);
       expect(gasUsed).to.be.greaterThan(0n);
     }
   });
