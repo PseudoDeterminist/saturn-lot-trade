@@ -237,7 +237,7 @@ async function copyAddresses() {
   const lines = [
     `TETC=${TETC_ADDRESS || "-"}`,
     `TKN10K=${TKN10K_ADDRESS || "-"}`,
-    `SimpleLotTrade=${CONTRACT_ADDRESS || "-"}`
+    `SaturnLotTrade=${CONTRACT_ADDRESS || "-"}`
   ];
   const text = lines.join("\n");
   try {

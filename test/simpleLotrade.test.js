@@ -125,8 +125,8 @@ async function deployFixture() {
     ethers.parseUnits("1000000", 18)
   );
   const tkn = await TestERC20.deploy("TKN10K", "TKN10K", 0, 1000000n);
-  const SimpleLotrade = await ethers.getContractFactory("SimpleLotrade");
-  const lotrade = await SimpleLotrade.deploy(
+  const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
+  const lotrade = await SaturnLotTrade.deploy(
     await tetc.getAddress(),
     await tkn.getAddress()
   );
@@ -152,8 +152,8 @@ async function deployReentrantFixture() {
     ethers.parseUnits("1000000", 18)
   );
   const tkn = await TestERC20.deploy("TKN10K", "TKN10K", 0, 1000000n);
-  const SimpleLotrade = await ethers.getContractFactory("SimpleLotrade");
-  const lotrade = await SimpleLotrade.deploy(
+  const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
+  const lotrade = await SaturnLotTrade.deploy(
     await tetc.getAddress(),
     await tkn.getAddress()
   );
@@ -164,7 +164,7 @@ async function deployReentrantFixture() {
   return { deployer, alice, tetc, tkn, lotrade };
 }
 
-describe("SimpleLotrade", function () {
+describe("SaturnLotTrade", function () {
   it("reverts for out-of-range ticks and is monotonic at bounds", async () => {
     const { lotrade } = await loadFixture(deployFixture);
 

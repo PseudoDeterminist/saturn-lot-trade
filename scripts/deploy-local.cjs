@@ -125,10 +125,10 @@ async function main() {
   await waitForReceipt(tkn10k.deploymentTransaction(), "TKN10K deploy");
   console.log("TKN10K:", tkn10k.target);
 
-  const SimpleLotTrade = await ethers.getContractFactory("SimpleLotrade");
-  const clob = await SimpleLotTrade.deploy(tetc.target, tkn10k.target);
-  await waitForReceipt(clob.deploymentTransaction(), "SimpleLotTrade deploy");
-  console.log("SimpleLotTrade:", clob.target);
+  const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
+  const clob = await SaturnLotTrade.deploy(tetc.target, tkn10k.target);
+  await waitForReceipt(clob.deploymentTransaction(), "SaturnLotTrade deploy");
+  console.log("SaturnLotTrade:", clob.target);
 
   await seedOrders(clob, tetc, tkn10k, waitForReceipt);
   console.log("Seeded initial book orders.");

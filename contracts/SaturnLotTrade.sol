@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 /*
-  SimpleLotrade v0.6.3 (Design / Testnet)
+  SaturnLotTrade v0.6.3 (Design / Testnet)
   By PseudoDeterminist
-  See README at https://github.com/PseudoDeterminist/SimpleLotTrade for details.
+  See README at https://github.com/PseudoDeterminist/SaturnLotTrade for details.
 */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -12,7 +12,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /* ===================== Lot CLOB ===================== */
 
-contract SimpleLotrade {
+contract SaturnLotTrade {
     using SafeERC20 for IERC20;
     // Tick range: -464 .. +1855 (5 decades * 464 ticks/decade)
     int32 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
