@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 /*
-  SaturnLotTrade v0.6.3 (Design / Testnet)
+  SimpleLotrade v0.6.3 (Design / Testnet)
   By PseudoDeterminist
   See README at https://github.com/PseudoDeterminist/saturn-lot-trade for details.
 */
@@ -12,12 +12,13 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /* ===================== Lot CLOB ===================== */
 
-contract SaturnLotTrade {
+contract SimpleLotrade {
     using SafeERC20 for IERC20;
     // Tick range: -464 .. +1855 (5 decades * 464 ticks/decade)
     int32 private constant MIN_TICK = -464; // 0.1 TETC per lot; 0.00001 TETC per TKN
     int32 private constant MAX_TICK = 1855; // 9950 TETC per lot; 0.995 TETC per TKN
     uint32 private constant MAX_LOTS = 100000;
+    uint256 private constant MIN_MAKER_NOTIONAL = 10e18; // 10 TETC (18 decimals)
 
     int32 private constant NONE_TICK = type(int32).min;
     int256 private constant NONE = int256(NONE_TICK);
@@ -323,6 +324,7 @@ contract SaturnLotTrade {
         uint32 lots32 = uint32(lots);
         uint96 price = uint96(priceAtTick(tick));
         uint256 cost = uint256(lots32) * uint256(price);
+        require(cost >= MIN_MAKER_NOTIONAL, "min notional");
 
         // Escrow TETC in this contract
         TETC.safeTransferFrom(msg.sender, address(this), cost); // reverts on insufficient balance/allowance
@@ -347,12 +349,13 @@ contract SaturnLotTrade {
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
 
-        // Escrow TKN10K lots in this contract
         uint32 lots32 = uint32(lots);
-        TKN10K.safeTransferFrom(msg.sender, address(this), uint256(lots32));  // reverts on insufficient balance/allowance
-
         uint96 price = uint96(priceAtTick(tick));
         uint256 value = uint256(lots32) * uint256(price);
+        require(value >= MIN_MAKER_NOTIONAL, "min notional");
+
+        // Escrow TKN10K lots in this contract
+        TKN10K.safeTransferFrom(msg.sender, address(this), uint256(lots32));  // reverts on insufficient balance/allowance
 
         id = _newOrder(false, t, lots32, uint128(value));
         _enqueue(false, t, price, lots32, uint128(value), id);
