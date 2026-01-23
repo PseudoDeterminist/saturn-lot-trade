@@ -21,6 +21,12 @@ WETC is the wrapped ETC quote asset used on ETC mainnet. In tests, a mock WETC i
 - ETC mainnet SaturnLotTrade: https://etc.blockscout.com/address/0x989445dA165F787Bb07B9C04946D87BbF9051EEf#code
 - Mordor testnet SaturnLotTrade: https://etc-mordor.blockscout.com/address/0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8#code
 
+## Token addresses (ETC mainnet)
+
+- STRN: `0xeEd7A7fB8659663C7be8EF6985e38c62cB616Ca6`
+- STRN10K: `0x7d35D3938c3b4446473a4ac29351Bd93694b5DEF`
+- WETC: `0x82A618305706B14e7bcf2592D4B9324A366b6dAd`
+
 This contract is NOT for small trades! It's designed to do high-value Lot Trading only. As such, its design is intended to entirely eliminate dust from trading, and to never waste block space on small trades that are perhaps best done on Layer 2 platforms.
 
 It is this author's belief that on-chain orderbook trading may never be the "right" way to trade; but if it can be, this contract is trying to implement the kind of model that could succeed.
