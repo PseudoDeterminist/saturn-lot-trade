@@ -8,9 +8,7 @@ const ENV_PATH = path.join(ROOT, ".env");
 function updateEnvFile(filePath, entries) {
   let lines = [];
   if (fs.existsSync(filePath)) {
-    lines = fs.readFileSync(filePath, "utf8").split(/
-?
-/);
+    lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   }
   const used = new Set();
   const next = lines.map((line) => {
@@ -27,9 +25,7 @@ function updateEnvFile(filePath, entries) {
   }
   let last = next.length - 1;
   while (last >= 0 && next[last] === "") last -= 1;
-  const output = last >= 0 ? `${next.slice(0, last + 1).join("
-")}
-` : "";
+  const output = last >= 0 ? `${next.slice(0, last + 1).join("\n")}\n` : "";
   fs.writeFileSync(filePath, output);
 }
 
@@ -105,13 +101,33 @@ async function main() {
   const wetcSupply = ethers.parseUnits("1000000", 18); // 1,000,000 WETC
   const strn10kSupply = ethers.parseUnits("100000", 0); // 100,000 lots
 
-  const wetc = await TestERC20.deploy("WETC", "WETC", 18, wetcSupply);
-  await waitForReceipt(wetc.deploymentTransaction(), "WETC deploy");
-  console.log("WETC:", wetc.target);
+  let wetc;
+  if (process.env.MORDOR_WETC_ADDRESS) {
+    const code = await ethers.provider.getCode(process.env.MORDOR_WETC_ADDRESS);
+    if (code && code !== "0x") {
+      wetc = await ethers.getContractAt("TestERC20", process.env.MORDOR_WETC_ADDRESS);
+      console.log("WETC (existing):", wetc.target);
+    }
+  }
+  if (!wetc) {
+    wetc = await TestERC20.deploy("WETC", "WETC", 18, wetcSupply);
+    await waitForReceipt(wetc.deploymentTransaction(), "WETC deploy");
+    console.log("WETC:", wetc.target);
+  }
 
-  const strn10k = await TestERC20.deploy("STRN10K", "STRN10K", 0, strn10kSupply);
-  await waitForReceipt(strn10k.deploymentTransaction(), "STRN10K deploy");
-  console.log("STRN10K:", strn10k.target);
+  let strn10k;
+  if (process.env.MORDOR_STRN10K_ADDRESS) {
+    const code = await ethers.provider.getCode(process.env.MORDOR_STRN10K_ADDRESS);
+    if (code && code !== "0x") {
+      strn10k = await ethers.getContractAt("TestERC20", process.env.MORDOR_STRN10K_ADDRESS);
+      console.log("STRN10K (existing):", strn10k.target);
+    }
+  }
+  if (!strn10k) {
+    strn10k = await TestERC20.deploy("STRN10K", "STRN10K", 0, strn10kSupply);
+    await waitForReceipt(strn10k.deploymentTransaction(), "STRN10K deploy");
+    console.log("STRN10K:", strn10k.target);
+  }
 
   const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
   const clob = await SaturnLotTrade.deploy(wetc.target, strn10k.target);
