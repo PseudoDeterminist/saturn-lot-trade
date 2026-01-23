@@ -321,7 +321,7 @@ contract SaturnLotTrade {
 
     /* -------------------- Maker Orders (escrow on placement) -------------------- */
 
-    function placeBuy(int256 tick, uint256 lots) external nonReentrant returns (uint64 id) {
+    function placeBuy(int256 tick, uint256 lots) public nonReentrant returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         int32 t = _toTick(tick);
         require(bestSellTick == NONE || bestSellTick > int256(t), "crossing sell book -- consider takeBuyFOK");
@@ -348,7 +348,12 @@ contract SaturnLotTrade {
         historyHash = chain;
     }
 
-    function placeSell(int256 tick, uint256 lots) external nonReentrant returns (uint64 id) {
+    function placeBuy(int256 tick, uint256 lots, bytes32 expectedHash) external returns (uint64 id) {
+        require(historyHash == expectedHash, "stale hash");
+        return placeBuy(tick, lots);
+    }
+
+    function placeSell(int256 tick, uint256 lots) public nonReentrant returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         int32 t = _toTick(tick);
         require(bestBuyTick == NONE || bestBuyTick < int256(t), "crossing buy book -- consider takeSellFOK");
@@ -373,6 +378,11 @@ contract SaturnLotTrade {
         (seq, chain) = _emitPlaced(seq, chain, id, msg.sender, false, t, lots32, uint128(value));
         historySeq = seq;
         historyHash = chain;
+    }
+
+    function placeSell(int256 tick, uint256 lots, bytes32 expectedHash) external returns (uint64 id) {
+        require(historyHash == expectedHash, "stale hash");
+        return placeSell(tick, lots);
     }
 
     function cancel(uint64 id) external nonReentrant {
@@ -410,7 +420,7 @@ contract SaturnLotTrade {
 
     /* -------------------- Taker FOK -------------------- */
 
-    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) external nonReentrant {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) public nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestSellTick != NONE, "There are no sell orders on book");
         require(lots <= bookEscrowSTRN10K, "insufficient escrowed STRN10K on book");
@@ -531,7 +541,12 @@ contract SaturnLotTrade {
         }
     }
 
-    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) external nonReentrant {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn, bytes32 expectedHash) external {
+        require(historyHash == expectedHash, "stale hash");
+        takeBuyFOK(limitTick, lots, maxTetcIn);
+    }
+
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) public nonReentrant {
         require(lots > 0, "You requested zero lots");
         require(bestBuyTick != NONE, "There are no buy orders on book");
         require(lots <= bookAskSTRN10K, "insufficient asked STRN10K on book");
@@ -645,6 +660,11 @@ contract SaturnLotTrade {
         lastTradePrice = price;
         lastTradeBlock = block.number;
 
+    }
+
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut, bytes32 expectedHash) external {
+        require(historyHash == expectedHash, "stale hash");
+        takeSellFOK(limitTick, lots, minTetcOut);
     }
 
     /* -------------------- Internals: Orders / Levels -------------------- */
