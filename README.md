@@ -1,20 +1,22 @@
-# Simple Lot Trading EVM Contract
+# Saturn Lot Trading EVM Contract
 
 This project demonstrates a basic Lot Trading token pair, intended for the Ethereum Classic blockchain. It's especially suited for ETC because it's meant to trade at the speed of proof of work: Slowly but at high value.
 
-The tokens in this contract are generic test tokens, worth zero and always will be (They'll be given away freely to users who want to test on chain).
+In tests this contract uses generic mock tokens. On ETC mainnet it is configured for WETC (quote) and STRN10K (base lot token).
 
-TKN10K represents a 10,000-token Lot, meant to be a wrapper for the underlying asset at 10K TKN to exactly 1 (no decimals) TKN10K.
+STRN10K represents a 10,000-token Lot, meant to be a wrapper for the underlying asset at 10K STRN to exactly 1 (no decimals) STRN10K.
 
-TETC is Test ETC, and stands in for WETC as it would be in a real exchange contract. Of course it can be any "money" asset, but here it's like WETC.
+WETC is the wrapped ETC quote asset used on ETC mainnet. In tests, a mock WETC is deployed.
 
-So you see this contract is NOT for small trades! It's designed to do high-value Lot Trading only. As such, its design is intended to entirely eliminate dust from trading, and to never waste block space on small trades that are perhaps best done on Layer 2 platforms.
+This contract is NOT for small trades! It's designed to do high-value Lot Trading only. As such, its design is intended to entirely eliminate dust from trading, and to never waste block space on small trades that are perhaps best done on Layer 2 platforms.
 
-It is this writer's belief that on-chain orderbook trading may never be the "right" way to trade; but if it can be, this contract is trying to implement the kind of model that could succeed.
+It is this author's belief that on-chain orderbook trading may never be the "right" way to trade; but if it can be, this contract is trying to implement the kind of model that could succeed.
 
-Trading is by its nature aggressive and adversarial. We don't want to eliminate these qualities from Layer 1, but if they're to be played out at high value on expensive proof-of-work blocks that are 15 seconds apart, then some important tradeoffs must be made. This contract represents one possible experimental way to do it.
+Trading is by its nature aggressive and adversarial. We don't want to eliminate these qualities from Layer 1, but if they're to be played out at high value on expensive proof-of-work blocks that are 15 seconds apart, then some important tradeoffs must be made. This contract represents one possible way to do it.
 
 Prices available for traders to set in this contract are spaced out along an exponential price curve, here plotted as assets/PriceCurve.png, using the python program at tools/PriceTicks.py, which was used to create the curve for solidity.
+
+Why exponential? So that movements up or down this curve will always represent a nearly constant percentage (approximately 1/2 %) of the current price.
 
 ![Price tick curve showing exponential distribution from 1000 to 99500](tools/assets/PriceCurve.png)
 
@@ -32,7 +34,7 @@ And the whole list would then be repeated again at 100000, ten times higher and 
 
 The curve shown is just two generations of the price ticks, to show visually that they do smoothly join together.
 
-For the Solidity contract TKN10KLotTrade.sol, the price ticks are consolidated in a hexadecimal block for efficient blockchain use:
+For the Solidity contract SaturnLotTrade.sol, the price ticks are consolidated in a hexadecimal block for efficient blockchain use:
 
 ```bytes internal constant MANT =
         hex"03e803ed03f203f703fc04010406040b04100416041b04200425042b04300435"
@@ -53,10 +55,11 @@ So if you were trading at 1000 wei (which no one would, but the curve does start
 
 By the time you are at 9950 your next price tick will be 10000 and you continue smoothly up from there into (hopefully) eventually reasonable prices!
 
-If your price is, say, 0.1015 ETC for a Lot of 10K TKN, then the integer price on chain is 101500000000000000 wei, derived from this curve. Your next lower price is .1010 ETC and your next higher price is .1020 ETC.
+If your price is, say, 0.1015 ETC for a Lot of 10K STRN, then the integer price on chain is 101500000000000000 wei, derived from this curve. Your next lower price is .1010 ETC and your next higher price is .1020 ETC.
 
-You see that the ticks are designed to have only four significant decimal digits at all scales. 
+The ticks are designed to have only four significant decimal digits at all scales. 
 
 This aids both in human readability and in eliminating dust-level "precision" in trying to fit prices exactly to the curve. We sacrifice that exactness for these benefits, and yet the curve still looks smooth at scale, as the plot shows.
 
 Traders don't get into petty price-difference wars between ticks, because those prices are unavailable by design. This means if a trader wants to set the new "best trade" they must be willing to lower the best price or raise the highest bid by a full half percent!
+

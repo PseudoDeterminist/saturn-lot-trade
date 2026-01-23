@@ -423,7 +423,6 @@ contract SaturnLotTrade {
         uint256 remain = lots;
         uint256 spent = 0;
         uint96 price;
-
         uint256 bookEscrowTkn = bookEscrowSTRN10K;
         uint256 bookAskTetc = bookAskWETC;
 
@@ -546,7 +545,6 @@ contract SaturnLotTrade {
         uint256 remain = lots;
         uint256 got = 0;
         uint96 price;
-
         uint256 bookAskTkn = bookAskSTRN10K;
         uint256 bookEscrowTetc = bookEscrowWETC;
 
