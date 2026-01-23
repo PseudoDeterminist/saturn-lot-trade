@@ -15,6 +15,10 @@ The UI supports a query parameter to switch between local Hardhat and ETC mainne
 - Hardhat (default): open `ui/index.html`
 - ETC mainnet: open `ui/index.html?net=etc` (uses your local ETC node at `http://127.0.0.1:8545`)
 
+Demo mode is now opt-in:
+
+- Demo data: open `ui/index.html?demo=1` (or `ui/index.html?net=etc&demo=1`)
+
 ## Deploy checklist (ETC mainnet)
 
 - Confirm token addresses in `.env`: `MAINNET_WETC_ADDRESS`, `MAINNET_STRN10K_ADDRESS`.

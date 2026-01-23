@@ -7,6 +7,7 @@ const WETC_ADDRESS = config.wetcAddress || "";
 const STRN10K_ADDRESS = config.strn10kAddress || "";
 const MAX_LEVELS_DEFAULT = config.maxLevels || 25;
 const MAX_ORDERS_DEFAULT = config.maxOrders || 50;
+const DEMO_MODE = new URLSearchParams(window.location.search).get("demo") === "1";
 
 const ABI = [
   "function getBuyBook(uint256) view returns (tuple(int256 tick,uint256 price,uint256 totalLots,uint256 totalValue,uint256 orderCount)[] out,uint256 n)",
@@ -156,6 +157,11 @@ function setDepth(value) {
 }
 
 function setDemoMode(reason) {
+  if (!DEMO_MODE) {
+    setStatus("RPC error", false);
+    el.chainStatus.textContent = reason || "No RPC";
+    return;
+  }
   state.demoMode = true;
   setStatus("Demo mode", false);
   el.chainStatus.textContent = reason || "No RPC";
