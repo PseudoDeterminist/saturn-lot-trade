@@ -164,6 +164,7 @@ function setDemoMode(reason) {
   }
   state.demoMode = true;
   setStatus("Demo mode", false);
+  el.lastUpdate.textContent = "Demo data enabled";
   el.chainStatus.textContent = reason || "No RPC";
   el.emptyBanner.hidden = true;
   renderDemo();
