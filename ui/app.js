@@ -4,7 +4,7 @@ const config = window.APP_CONFIG || {};
 const RPC_URL = config.rpcUrl || "http://127.0.0.1:8545";
 const CONTRACT_ADDRESS = config.simpleLotTradeAddress || "";
 const WETC_ADDRESS = config.wetcAddress || "";
-const TKN10K_ADDRESS = config.tkn10kAddress || "";
+const STRN10K_ADDRESS = config.strn10kAddress || "";
 const MAX_LEVELS_DEFAULT = config.maxLevels || 25;
 const MAX_ORDERS_DEFAULT = config.maxOrders || 50;
 
@@ -15,7 +15,7 @@ const ABI = [
   "function getSellOrders(uint256) view returns (tuple(uint256 id,address owner,int256 tick,uint256 price,uint256 lotsRemaining,uint256 valueRemaining)[] out,uint256 n)",
   "function getOracle() view returns (int256 bestBuyTick,int256 bestSellTick,int256 lastTradeTick,uint256 lastTradeBlock,uint256 lastTradePrice)",
   "function getTopOfBook() view returns (int256 bestBuyTick,uint256 buyLots,uint256 buyOrders,int256 bestSellTick,uint256 sellLots,uint256 sellOrders)",
-  "function getEscrowTotals() view returns (uint256 buyWETC,uint256 sellTKN10K)",
+  "function getEscrowTotals() view returns (uint256 buyWETC,uint256 sellSTRN10K)",
   "function priceAtTick(int256 tick) view returns (uint256)",
   "function cancel(uint64 id)",
   "function placeBuy(int256 tick,uint256 lots) returns (uint64)",
@@ -67,7 +67,7 @@ const el = {
   previewBtn: document.getElementById("preview-btn"),
   placeBtn: document.getElementById("place-btn"),
   addWetc: document.getElementById("add-wetc"),
-  addTkn10k: document.getElementById("add-tkn10k"),
+  addStrn10k: document.getElementById("add-strn10k"),
   ticketStatus: document.getElementById("ticket-status")
 };
 
@@ -79,7 +79,7 @@ const state = {
   readContract: null,
   writeContract: null,
   wetc: null,
-  tkn10k: null,
+  strn10k: null,
   side: "buy",
   demoMode: false,
   lastTradeTick: null,
@@ -204,8 +204,8 @@ async function addTokenToWallet(address, fallbackSymbol, fallbackDecimals) {
     const token =
       address.toLowerCase() === WETC_ADDRESS.toLowerCase()
         ? state.wetc
-        : address.toLowerCase() === TKN10K_ADDRESS.toLowerCase()
-          ? state.tkn10k
+        : address.toLowerCase() === STRN10K_ADDRESS.toLowerCase()
+          ? state.strn10k
           : new ethers.Contract(address, ERC20_ABI, state.readProvider);
     if (token) {
       const [sym, dec] = await Promise.all([token.symbol(), token.decimals()]);
@@ -236,7 +236,7 @@ async function addTokenToWallet(address, fallbackSymbol, fallbackDecimals) {
 async function copyAddresses() {
   const lines = [
     `WETC=${WETC_ADDRESS || "-"}`,
-    `TKN10K=${TKN10K_ADDRESS || "-"}`,
+    `STRN10K=${STRN10K_ADDRESS || "-"}`,
     `SaturnLotTrade=${CONTRACT_ADDRESS || "-"}`
   ];
   const text = lines.join("\n");
@@ -257,7 +257,7 @@ async function initProvider() {
   }
   state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.readProvider);
   if (WETC_ADDRESS) state.wetc = new ethers.Contract(WETC_ADDRESS, ERC20_ABI, state.readProvider);
-  if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.readProvider);
+  if (STRN10K_ADDRESS) state.strn10k = new ethers.Contract(STRN10K_ADDRESS, ERC20_ABI, state.readProvider);
   state.readSource = "rpc";
 }
 
@@ -265,7 +265,7 @@ function useWalletForReads() {
   if (!state.walletProvider) return false;
   state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.walletProvider);
   if (WETC_ADDRESS) state.wetc = new ethers.Contract(WETC_ADDRESS, ERC20_ABI, state.walletProvider);
-  if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.walletProvider);
+  if (STRN10K_ADDRESS) state.strn10k = new ethers.Contract(STRN10K_ADDRESS, ERC20_ABI, state.walletProvider);
   state.readSource = "wallet";
   return true;
 }
@@ -511,8 +511,8 @@ async function refresh() {
     el.lastTrade.textContent = `${formatTick(lastTradeTick)} @ ${formatWetc(lastTradePrice)}`;
     el.lastBlock.textContent = lastTradeBlock.toString();
 
-    const [buyWETC, sellTKN10K] = escrow;
-    el.escrowTotals.textContent = `${formatWetc(buyWETC)} WETC / ${formatLots(sellTKN10K)} lots`;
+    const [buyWETC, sellSTRN10K] = escrow;
+    el.escrowTotals.textContent = `${formatWetc(buyWETC)} WETC / ${formatLots(sellSTRN10K)} lots`;
     const totalLots = [...buyLevels, ...sellLevels].reduce(
       (acc, lvl) => acc + BigInt(lvl.totalLots),
       0n
@@ -640,7 +640,7 @@ async function seedOrders() {
     setTicketStatus("Connect a wallet to seed orders.");
     return;
   }
-  if (!state.wetc || !state.tkn10k) {
+  if (!state.wetc || !state.strn10k) {
     setTicketStatus("Token addresses missing for seeding.");
     return;
   }
@@ -672,26 +672,26 @@ async function seedOrders() {
 
     const owner = await state.signer.getAddress();
     const wetc = state.wetc.connect(state.signer);
-    const tkn10k = state.tkn10k.connect(state.signer);
+    const strn10k = state.strn10k.connect(state.signer);
 
     let neededWetc = 0n;
     for (const order of buySeeds) {
       const price = await state.readContract.priceAtTick(order.tick);
       neededWetc += price * BigInt(order.lots);
     }
-    const neededTkn = sellSeeds.reduce((acc, order) => acc + BigInt(order.lots), 0n);
+    const neededStrn10k = sellSeeds.reduce((acc, order) => acc + BigInt(order.lots), 0n);
 
-    const [wetcAllowance, tknAllowance] = await Promise.all([
+    const [wetcAllowance, strn10kAllowance] = await Promise.all([
       wetc.allowance(owner, CONTRACT_ADDRESS),
-      tkn10k.allowance(owner, CONTRACT_ADDRESS)
+      strn10k.allowance(owner, CONTRACT_ADDRESS)
     ]);
 
     if (wetcAllowance < neededWetc) {
       const tx = await wetc.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
       await tx.wait();
     }
-    if (tknAllowance < neededTkn) {
-      const tx = await tkn10k.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
+    if (strn10kAllowance < neededStrn10k) {
+      const tx = await strn10k.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
       await tx.wait();
     }
 
@@ -720,8 +720,8 @@ function bindEvents() {
   if (el.addWetc) {
     el.addWetc.addEventListener("click", () => addTokenToWallet(WETC_ADDRESS, "WETC", 18));
   }
-  if (el.addTkn10k) {
-    el.addTkn10k.addEventListener("click", () => addTokenToWallet(TKN10K_ADDRESS, "TKN10K", 0));
+  if (el.addStrn10k) {
+    el.addStrn10k.addEventListener("click", () => addTokenToWallet(STRN10K_ADDRESS, "STRN10K", 0));
   }
   el.refreshBtn.addEventListener("click", refresh);
   el.previewBtn.addEventListener("click", previewOrder);

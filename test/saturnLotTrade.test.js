@@ -124,21 +124,21 @@ async function deployFixture() {
     18,
     ethers.parseUnits("1000000", 18)
   );
-  const tkn = await TestERC20.deploy("TKN10K", "TKN10K", 0, 1000000n);
+  const strn10k = await TestERC20.deploy("STRN10K", "STRN10K", 0, 1000000n);
   const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
   const lotrade = await SaturnLotTrade.deploy(
     await wetc.getAddress(),
-    await tkn.getAddress()
+    await strn10k.getAddress()
   );
 
   const wetcAmount = ethers.parseUnits("100000", 18);
-  const tknAmount = 100000n;
+  const strn10kAmount = 100000n;
   for (const user of [alice, bob, carol]) {
     await wetc.transfer(user.address, wetcAmount);
-    await tkn.transfer(user.address, tknAmount);
+    await strn10k.transfer(user.address, strn10kAmount);
   }
 
-  return { deployer, alice, bob, carol, wetc, tkn, lotrade };
+  return { deployer, alice, bob, carol, wetc, strn10k, lotrade };
 }
 
 
@@ -227,9 +227,9 @@ describe("SaturnLotTrade", function () {
   });
 
   it("reverts taker when lots exceed book totals", async () => {
-    const { lotrade, wetc, tkn, alice } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice } = await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 1n);
+    await strn10k.connect(alice).approve(lotrade, 1n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 1n)).wait();
 
     const price = await lotrade.priceAtTick(0);
@@ -259,22 +259,22 @@ describe("SaturnLotTrade", function () {
   });
 
   it("reverts sell FOK when limit tick blocks fill", async () => {
-    const { lotrade, wetc, tkn, alice, carol } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice, carol } = await loadFixture(deployFixture);
 
     const price = await lotrade.priceAtTick(0);
     await wetc.connect(alice).approve(lotrade, price);
     await (await lotrade.connect(alice)["placeBuy(int256,uint256)"](0, 1n)).wait();
 
-    await tkn.connect(carol).approve(lotrade, 1n);
+    await strn10k.connect(carol).approve(lotrade, 1n);
     await expect(
       lotrade.connect(carol)["takeSellFOK(int256,uint256,uint256)"](1, 1n, 0)
     ).to.be.revertedWith("FOK--Limit tick crossed");
   });
 
   it("rejects buys that cross the sell book", async () => {
-    const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 5n);
+    await strn10k.connect(alice).approve(lotrade, 5n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 5n)).wait();
 
     const price = await lotrade.priceAtTick(0);
@@ -289,13 +289,13 @@ describe("SaturnLotTrade", function () {
   });
 
   it("rejects sells that cross the buy book", async () => {
-    const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
 
     const price = await lotrade.priceAtTick(0);
     await wetc.connect(alice).approve(lotrade, price * 5n);
     await (await lotrade.connect(alice)["placeBuy(int256,uint256)"](0, 5n)).wait();
 
-    await tkn.connect(bob).approve(lotrade, 5n);
+    await strn10k.connect(bob).approve(lotrade, 5n);
     await expect(lotrade.connect(bob)["placeSell(int256,uint256)"](0, 5n)).to.be.revertedWith(
       "crossing buy book -- consider takeSellFOK"
     );
@@ -305,13 +305,13 @@ describe("SaturnLotTrade", function () {
   });
 
   it("enforces expected hash on maker overloads", async () => {
-    const { lotrade, wetc, tkn, alice } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice } = await loadFixture(deployFixture);
 
     const tick = 0;
     const lots = 1n;
     const price = await lotrade.priceAtTick(tick);
     await wetc.connect(alice).approve(lotrade, price * lots);
-    await tkn.connect(alice).approve(lotrade, lots);
+    await strn10k.connect(alice).approve(lotrade, lots);
 
     const hash = await lotrade.historyHash();
     await (
@@ -340,13 +340,13 @@ describe("SaturnLotTrade", function () {
   });
 
   it("enforces expected hash on taker overloads", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
 
     const tick = 0;
     const lots = 1n;
 
-    await tkn.connect(alice).approve(lotrade, lots);
+    await strn10k.connect(alice).approve(lotrade, lots);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](tick, lots)).wait();
 
     const price = await lotrade.priceAtTick(tick);
@@ -380,7 +380,7 @@ describe("SaturnLotTrade", function () {
     await (await lotrade.connect(alice)["placeBuy(int256,uint256)"](tick, lots)).wait();
 
     const sellHash = await lotrade.historyHash();
-    await tkn.connect(carol).approve(lotrade, lots);
+    await strn10k.connect(carol).approve(lotrade, lots);
     await (
       await lotrade
         .connect(carol)
@@ -405,12 +405,12 @@ describe("SaturnLotTrade", function () {
   });
 
   it("fills orders FIFO within a tick", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
     const tick = 0;
 
-    await tkn.connect(alice).approve(lotrade, 5n);
-    await tkn.connect(bob).approve(lotrade, 5n);
+    await strn10k.connect(alice).approve(lotrade, 5n);
+    await strn10k.connect(bob).approve(lotrade, 5n);
 
     const id1 = await lotrade.connect(alice)["placeSell(int256,uint256)"].staticCall(tick, 5n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](tick, 5n)).wait();
@@ -434,11 +434,11 @@ describe("SaturnLotTrade", function () {
   });
 
   it("reverts FOK when limit tick blocks full fill (no state change)", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 5n);
-    await tkn.connect(bob).approve(lotrade, 4n);
+    await strn10k.connect(alice).approve(lotrade, 5n);
+    await strn10k.connect(bob).approve(lotrade, 4n);
     const id1 = await lotrade.connect(alice)["placeSell(int256,uint256)"].staticCall(0, 5n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 5n)).wait();
     const id2 = await lotrade.connect(bob)["placeSell(int256,uint256)"].staticCall(1, 4n);
@@ -463,10 +463,10 @@ describe("SaturnLotTrade", function () {
   });
 
   it("reverts buy FOK on slippage before state updates", async () => {
-    const { lotrade, wetc, tkn, alice, carol } =
+    const { lotrade, wetc, strn10k, alice, carol } =
       await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 5n);
+    await strn10k.connect(alice).approve(lotrade, 5n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 5n)).wait();
 
     const price = await lotrade.priceAtTick(0);
@@ -481,11 +481,11 @@ describe("SaturnLotTrade", function () {
   });
 
   it("fills across ticks and updates oracle fields", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 5n);
-    await tkn.connect(bob).approve(lotrade, 4n);
+    await strn10k.connect(alice).approve(lotrade, 5n);
+    await strn10k.connect(bob).approve(lotrade, 4n);
     const id1 = await lotrade.connect(alice)["placeSell(int256,uint256)"].staticCall(0, 5n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 5n)).wait();
     const id2 = await lotrade.connect(bob)["placeSell(int256,uint256)"].staticCall(1, 4n);
@@ -512,10 +512,10 @@ describe("SaturnLotTrade", function () {
   });
 
   it("refunds unused quote in buy FOK", async () => {
-    const { lotrade, wetc, tkn, alice, carol } =
+    const { lotrade, wetc, strn10k, alice, carol } =
       await loadFixture(deployFixture);
 
-    await tkn.connect(alice).approve(lotrade, 3n);
+    await strn10k.connect(alice).approve(lotrade, 3n);
     await (await lotrade.connect(alice)["placeSell(int256,uint256)"](0, 3n)).wait();
 
     const price = await lotrade.priceAtTick(0);
@@ -531,7 +531,7 @@ describe("SaturnLotTrade", function () {
   });
 
   it("reverts sell FOK when min output is too high", async () => {
-    const { lotrade, wetc, tkn, alice, carol } =
+    const { lotrade, wetc, strn10k, alice, carol } =
       await loadFixture(deployFixture);
 
     const price = await lotrade.priceAtTick(0);
@@ -540,14 +540,14 @@ describe("SaturnLotTrade", function () {
     await wetc.connect(alice).approve(lotrade, cost);
     await (await lotrade.connect(alice)["placeBuy(int256,uint256)"](0, 10n)).wait();
 
-    await tkn.connect(carol).approve(lotrade, 5n);
+    await strn10k.connect(carol).approve(lotrade, 5n);
     await expect(
       lotrade.connect(carol)["takeSellFOK(int256,uint256,uint256)"](0, 5n, price * 5n + 1n)
     ).to.be.revertedWith("FOK--Slippage exceeded");
   });
 
   it("allows partial fills then cancel refunds remaining escrow", async () => {
-    const { lotrade, wetc, tkn, alice, carol } =
+    const { lotrade, wetc, strn10k, alice, carol } =
       await loadFixture(deployFixture);
 
     const price = await lotrade.priceAtTick(0);
@@ -557,7 +557,7 @@ describe("SaturnLotTrade", function () {
     const id = await lotrade.connect(alice)["placeBuy(int256,uint256)"].staticCall(0, 10n);
     await (await lotrade.connect(alice)["placeBuy(int256,uint256)"](0, 10n)).wait();
 
-    await tkn.connect(carol).approve(lotrade, 4n);
+    await strn10k.connect(carol).approve(lotrade, 4n);
     await (await lotrade.connect(carol)["takeSellFOK(int256,uint256,uint256)"](0, 4n, 0)).wait();
 
     const order = await lotrade.orders(id);
@@ -584,14 +584,14 @@ describe("SaturnLotTrade", function () {
   });
 
   it("maintains book invariants under randomized actions (multi-seed)", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
 
     const actors = [alice, bob, carol];
     const maxWetc = ethers.parseUnits("100000", 18);
     for (const actor of actors) {
       await wetc.connect(actor).approve(lotrade, maxWetc);
-      await tkn.connect(actor).approve(lotrade, 100000n);
+      await strn10k.connect(actor).approve(lotrade, 100000n);
     }
 
     const orderIds = [];
@@ -695,7 +695,7 @@ describe("SaturnLotTrade", function () {
   });
 
   it("exposes book levels, FIFO orders, top-of-book, and oracle views", async () => {
-    const { lotrade, wetc, tkn, alice, bob, carol } =
+    const { lotrade, wetc, strn10k, alice, bob, carol } =
       await loadFixture(deployFixture);
 
     const buyTick1 = 2;
@@ -712,8 +712,8 @@ describe("SaturnLotTrade", function () {
     const buyId2 = await lotrade.connect(bob)["placeBuy(int256,uint256)"].staticCall(buyTick2, 2n);
     await lotrade.connect(bob)["placeBuy(int256,uint256)"](buyTick2, 2n);
 
-    await tkn.connect(alice).approve(lotrade, 4n);
-    await tkn.connect(bob).approve(lotrade, 3n);
+    await strn10k.connect(alice).approve(lotrade, 4n);
+    await strn10k.connect(bob).approve(lotrade, 3n);
     const sellId1 = await lotrade.connect(alice)["placeSell(int256,uint256)"].staticCall(sellTick1, 4n);
     await lotrade.connect(alice)["placeSell(int256,uint256)"](sellTick1, 4n);
     const sellId2 = await lotrade.connect(bob)["placeSell(int256,uint256)"].staticCall(sellTick2, 3n);
@@ -784,7 +784,7 @@ describe("Gas metrics", function () {
   }
 
   it("logs maker gas for placeBuy and placeSell", async () => {
-    const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+    const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
 
     const buyTick = 0;
     const sellTick = 1;
@@ -799,7 +799,7 @@ describe("Gas metrics", function () {
     );
     logGas("placeBuy (1 lot, warmed)", gasPlaceBuy);
 
-    await tkn.connect(bob).approve(lotrade, lots * 2n);
+    await strn10k.connect(bob).approve(lotrade, lots * 2n);
     await lotrade.connect(bob)["placeSell(int256,uint256)"](sellTick, lots, GAS_OVERRIDES);
     const gasPlaceSell = await gasUsedFor(
       lotrade.connect(bob)["placeSell(int256,uint256)"](sellTick, lots, GAS_OVERRIDES)
@@ -812,11 +812,11 @@ describe("Gas metrics", function () {
 
   it("logs taker gas for takeBuyFOK single vs 200 orders (single tick + 200 ticks)", async () => {
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const tick = 0;
       const lots = 1n;
 
-      await tkn.connect(alice).approve(lotrade, lots);
+      await strn10k.connect(alice).approve(lotrade, lots);
       await lotrade.connect(alice)["placeSell(int256,uint256)"](tick, lots);
 
       const price = await lotrade.priceAtTick(tick);
@@ -830,14 +830,14 @@ describe("Gas metrics", function () {
     }
 
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const orders = 200;
       const tick = 0;
       const lotsPerOrder = 1n;
       const price = await lotrade.priceAtTick(tick);
       const maxWetcIn = price * BigInt(orders);
 
-      await tkn.connect(alice).approve(lotrade, BigInt(orders));
+      await strn10k.connect(alice).approve(lotrade, BigInt(orders));
       for (let i = 0; i < orders; i++) {
         await lotrade.connect(alice)["placeSell(int256,uint256)"](tick, lotsPerOrder);
       }
@@ -853,12 +853,12 @@ describe("Gas metrics", function () {
     }
 
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const orders = 200;
       const lotsPerOrder = 1n;
       let maxWetcIn = 0n;
 
-      await tkn.connect(alice).approve(lotrade, BigInt(orders));
+      await strn10k.connect(alice).approve(lotrade, BigInt(orders));
       for (let i = 0; i < orders; i++) {
         const tick = i;
         await lotrade.connect(alice)["placeSell(int256,uint256)"](tick, lotsPerOrder);
@@ -879,7 +879,7 @@ describe("Gas metrics", function () {
 
   it("logs taker gas for takeSellFOK single vs 200 orders (single tick + 200 ticks)", async () => {
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const tick = 0;
       const lots = 1n;
 
@@ -887,7 +887,7 @@ describe("Gas metrics", function () {
       await wetc.connect(alice).approve(lotrade, price * lots);
       await lotrade.connect(alice)["placeBuy(int256,uint256)"](tick, lots);
 
-      await tkn.connect(bob).approve(lotrade, lots);
+      await strn10k.connect(bob).approve(lotrade, lots);
       const gasUsed = await gasUsedFor(
         lotrade.connect(bob)["takeSellFOK(int256,uint256,uint256)"](tick, lots, price * lots, GAS_OVERRIDES)
       );
@@ -896,7 +896,7 @@ describe("Gas metrics", function () {
     }
 
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const orders = 200;
       const tick = 0;
       const lotsPerOrder = 1n;
@@ -908,7 +908,7 @@ describe("Gas metrics", function () {
         await lotrade.connect(alice)["placeBuy(int256,uint256)"](tick, lotsPerOrder);
       }
 
-      await tkn.connect(bob).approve(lotrade, BigInt(orders));
+      await strn10k.connect(bob).approve(lotrade, BigInt(orders));
       const gasUsed = await gasUsedFor(
         lotrade
           .connect(bob)
@@ -919,7 +919,7 @@ describe("Gas metrics", function () {
     }
 
     {
-      const { lotrade, wetc, tkn, alice, bob } = await loadFixture(deployFixture);
+      const { lotrade, wetc, strn10k, alice, bob } = await loadFixture(deployFixture);
       const orders = 200;
       const lotsPerOrder = 1n;
       let minWetcOut = 0n;
@@ -936,7 +936,7 @@ describe("Gas metrics", function () {
         await lotrade.connect(alice)["placeBuy(int256,uint256)"](tick, lotsPerOrder);
       }
 
-      await tkn.connect(bob).approve(lotrade, BigInt(orders));
+      await strn10k.connect(bob).approve(lotrade, BigInt(orders));
       const gasUsed = await gasUsedFor(
         lotrade
           .connect(bob)

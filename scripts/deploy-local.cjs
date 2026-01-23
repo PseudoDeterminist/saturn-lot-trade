@@ -34,8 +34,8 @@ function updateUiConfig(filePath, entries) {
   if (!fs.existsSync(filePath)) return;
   let text = fs.readFileSync(filePath, "utf8");
   const mapping = {
-    tetcAddress: entries.TETC_ADDRESS,
-    tkn10kAddress: entries.TKN10K_ADDRESS,
+    wetcAddress: entries.WETC_ADDRESS,
+    strn10kAddress: entries.STRN10K_ADDRESS,
     simpleLotTradeAddress: entries.SIMPLE_LOT_TRADE_ADDRESS
   };
   for (const [key, value] of Object.entries(mapping)) {
@@ -52,11 +52,11 @@ function writeAddresses(entries) {
   updateUiConfig(UI_CONFIG_PATH, entries);
 }
 
-async function seedOrders(clob, tetc, tkn10k, waitForReceipt) {
+async function seedOrders(clob, wetc, strn10k, waitForReceipt) {
   const maxApprove = ethers.MaxUint256;
 
-  await waitForReceipt(await tetc.approve(clob.target, maxApprove), "TETC approve");
-  await waitForReceipt(await tkn10k.approve(clob.target, maxApprove), "TKN10K approve");
+  await waitForReceipt(await wetc.approve(clob.target, maxApprove), "WETC approve");
+  await waitForReceipt(await strn10k.approve(clob.target, maxApprove), "STRN10K approve");
 
   const sellSeeds = [
     { tick: 121, lots: 60 },
@@ -114,28 +114,28 @@ async function main() {
 
   const TestERC20 = await ethers.getContractFactory("TestERC20");
 
-  const tetcSupply = ethers.parseUnits("1000000", 18); // 1,000,000 TETC
-  const tknSupply = ethers.parseUnits("100000", 0);  // 100,000 lots
+  const wetcSupply = ethers.parseUnits("1000000", 18); // 1,000,000 WETC
+  const strn10kSupply = ethers.parseUnits("100000", 0);  // 100,000 lots
 
-  const tetc = await TestERC20.deploy("Test ETC", "TETC", 18, tetcSupply);
-  await waitForReceipt(tetc.deploymentTransaction(), "TETC deploy");
-  console.log("TETC:", tetc.target);
+  const wetc = await TestERC20.deploy("Test ETC", "WETC", 18, wetcSupply);
+  await waitForReceipt(wetc.deploymentTransaction(), "WETC deploy");
+  console.log("WETC:", wetc.target);
 
-  const tkn10k = await TestERC20.deploy("TKN10K", "TKN10K", 0, tknSupply);
-  await waitForReceipt(tkn10k.deploymentTransaction(), "TKN10K deploy");
-  console.log("TKN10K:", tkn10k.target);
+  const strn10k = await TestERC20.deploy("STRN10K", "STRN10K", 0, strn10kSupply);
+  await waitForReceipt(strn10k.deploymentTransaction(), "STRN10K deploy");
+  console.log("STRN10K:", strn10k.target);
 
   const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
-  const clob = await SaturnLotTrade.deploy(tetc.target, tkn10k.target);
+  const clob = await SaturnLotTrade.deploy(wetc.target, strn10k.target);
   await waitForReceipt(clob.deploymentTransaction(), "SaturnLotTrade deploy");
   console.log("SaturnLotTrade:", clob.target);
 
-  await seedOrders(clob, tetc, tkn10k, waitForReceipt);
+  await seedOrders(clob, wetc, strn10k, waitForReceipt);
   console.log("Seeded initial book orders.");
 
   const addresses = {
-    TETC_ADDRESS: tetc.target,
-    TKN10K_ADDRESS: tkn10k.target,
+    WETC_ADDRESS: wetc.target,
+    STRN10K_ADDRESS: strn10k.target,
     SIMPLE_LOT_TRADE_ADDRESS: clob.target
   };
   writeAddresses(addresses);
