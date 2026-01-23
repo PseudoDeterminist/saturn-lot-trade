@@ -8,6 +8,19 @@ STRN10K represents a 10,000-token Lot, meant to be a wrapper for the underlying 
 
 WETC is the wrapped ETC quote asset used on ETC mainnet. In tests, a mock WETC is deployed.
 
+## Deploy checklist (ETC mainnet)
+
+- Confirm token addresses in `.env`: `MAINNET_WETC_ADDRESS`, `MAINNET_STRN10K_ADDRESS`.
+- Confirm RPC and deployer: `MAINNET_RPC_URL`, `MAINNET_DEPLOYER_PK`.
+- Deploy: `npx hardhat run --network etc scripts/deploy-etc.cjs`.
+- Verify: `npx hardhat verify --network etc <DEPLOYED_ADDRESS> <WETC_ADDRESS> <STRN10K_ADDRESS>`.
+- Record the verified Blockscout link after verification completes.
+
+## Deployment links
+
+- ETC mainnet SaturnLotTrade: https://etc.blockscout.com/address/0x989445dA165F787Bb07B9C04946D87BbF9051EEf#code
+- Mordor testnet SaturnLotTrade: https://etc-mordor.blockscout.com/address/0xf4B146FbA71F41E0592668ffbF264F1D186b2Ca8#code
+
 This contract is NOT for small trades! It's designed to do high-value Lot Trading only. As such, its design is intended to entirely eliminate dust from trading, and to never waste block space on small trades that are perhaps best done on Layer 2 platforms.
 
 It is this author's belief that on-chain orderbook trading may never be the "right" way to trade; but if it can be, this contract is trying to implement the kind of model that could succeed.
