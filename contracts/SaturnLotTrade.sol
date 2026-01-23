@@ -378,7 +378,7 @@ contract SaturnLotTrade {
 
     function cancel(uint64 id) external {
         Order storage o = orders[id];
-        require(o.owner == msg.sender, "not owner");
+        require(o.owner == msg.sender, "not order owner");
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -411,12 +411,12 @@ contract SaturnLotTrade {
 
     /* -------------------- Taker FOK -------------------- */
 
-    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) public {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxWetcIn) public {
         require(lots > 0, "You requested zero lots");
         require(bestSellTick != NONE256, "There are no sell orders on book");
         require(lots <= bookEscrowSTRN10K, "insufficient escrowed STRN10K on book");
 
-        WETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
+        WETC.safeTransferFrom(msg.sender, address(this), maxWetcIn); // escrow maxWetcIn. reverts on insufficient balance/allowance
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -424,13 +424,13 @@ contract SaturnLotTrade {
         uint256 remain = lots;
         uint256 spent = 0;
         uint96 price;
-        uint256 bookEscrowTkn = bookEscrowSTRN10K;
-        uint256 bookAskTetc = bookAskWETC;
+        uint256 bookEscrowStrn10k = bookEscrowSTRN10K;
+        uint256 bookAskWetc = bookAskWETC;
 
         int256 t = bestSellTick;
 
         while (remain > 0) {
-            require(t <= limitTick, "FOK");
+            require(t <= limitTick, "FOK--Limit tick crossed");
             TickLevel storage lvl = sellLevels[t];
 
             price = lvl.price;    // At this point either a trade happens at price or we advance and assign again
@@ -449,9 +449,9 @@ contract SaturnLotTrade {
 
                 uint256 pay = uint256(fill) * uint256(price);
 
-                // Slippage guard: total quote spent cannot exceed maxTetcIn
+                // Slippage guard: total quote spent cannot exceed maxWetcIn
                 spent += pay;
-                require(spent <= maxTetcIn, "slippage");
+                require(spent <= maxWetcIn, "FOK--Slippage exceeded");
 
                 // Update balances
                 uint128 remainingValue;
@@ -473,8 +473,8 @@ contract SaturnLotTrade {
 
                 lvl.totalLots -= fill;
                 lvl.totalValue -= uint128(pay);
-                bookEscrowTkn -= fill;
-                bookAskTetc -= pay;
+                bookEscrowStrn10k -= fill;
+                bookAskWetc -= pay;
 
                 remain -= fill;
 
@@ -514,10 +514,10 @@ contract SaturnLotTrade {
             }
         }
 
-        require(remain == 0, "unfilled");
+        require(remain == 0, "FOK--Unfilled");
 
-        bookEscrowSTRN10K = bookEscrowTkn;
-        bookAskWETC = bookAskTetc;
+        bookEscrowSTRN10K = bookEscrowStrn10k;
+        bookAskWETC = bookAskWetc;
 
         historySeq = seq;
         historyHash = chain;
@@ -527,21 +527,21 @@ contract SaturnLotTrade {
         lastTradePrice = price;
 
         // Refund any unspent WETC to taker
-        if (spent < maxTetcIn) {
-            WETC.safeTransfer(msg.sender, maxTetcIn - spent);
+        if (spent < maxWetcIn) {
+            WETC.safeTransfer(msg.sender, maxWetcIn - spent);
         }
     }
 
-    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn, bytes32 expectedHash) external {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxWetcIn, bytes32 expectedHash) external {
         require(historyHash == expectedHash, "stale hash");
-        takeBuyFOK(limitTick, lots, maxTetcIn);
+        takeBuyFOK(limitTick, lots, maxWetcIn);
     }
 
-    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) public {
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minWetcOut) public {
         require(lots > 0, "You requested zero lots");
         require(bestBuyTick != NONE256, "There are no buy orders on book");
-        require(lots <= bookAskSTRN10K, "insufficient asked STRN10K on book");
-        require(minTetcOut <= bookEscrowWETC, "insufficient escrowed WETC on book");
+        require(lots <= bookAskSTRN10K, "FOK--Insufficient asked STRN10K on book");
+        require(minWetcOut <= bookEscrowWETC, "FOK--Insufficient escrowed WETC on book");
 
         STRN10K.safeTransferFrom(msg.sender, address(this), lots); // escrow STRN10K. reverts on insufficient balance/allowance
 
@@ -551,13 +551,13 @@ contract SaturnLotTrade {
         uint256 remain = lots;
         uint256 got = 0;
         uint96 price;
-        uint256 bookAskTkn = bookAskSTRN10K;
-        uint256 bookEscrowTetc = bookEscrowWETC;
+        uint256 bookAskStrn10k = bookAskSTRN10K;
+        uint256 bookEscrowWetc = bookEscrowWETC;
 
         int256 t = bestBuyTick;
 
         while (remain > 0) {
-            require(t >= limitTick, "FOK");
+            require(t >= limitTick, "FOK--Limit tick crossed");
             TickLevel storage lvl = buyLevels[t];
 
             price = lvl.price;    // At this point either a trade happens at price or we revert on FOK
@@ -597,8 +597,8 @@ contract SaturnLotTrade {
 
                 lvl.totalLots -= fill;
                 lvl.totalValue -= uint128(receiveAmt);
-                bookAskTkn -= fill;
-                bookEscrowTetc -= receiveAmt;
+                bookAskStrn10k -= fill;
+                bookEscrowWetc -= receiveAmt;
 
                 remain -= fill;
 
@@ -638,11 +638,11 @@ contract SaturnLotTrade {
             }
         }
 
-        require(remain == 0, "unfilled");
-        require(got >= minTetcOut, "slippage");
+        require(remain == 0, "FOK--Unfilled");
+        require(got >= minWetcOut, "FOK--Slippage exceeded");
 
-        bookAskSTRN10K = bookAskTkn;
-        bookEscrowWETC = bookEscrowTetc;
+        bookAskSTRN10K = bookAskStrn10k;
+        bookEscrowWETC = bookEscrowWetc;
 
         historySeq = seq;
         historyHash = chain;
@@ -653,9 +653,9 @@ contract SaturnLotTrade {
 
     }
 
-    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut, bytes32 expectedHash) external {
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minWetcOut, bytes32 expectedHash) external {
         require(historyHash == expectedHash, "stale hash");
-        takeSellFOK(limitTick, lots, minTetcOut);
+        takeSellFOK(limitTick, lots, minWetcOut);
     }
 
     /* -------------------- Internals: Orders / Levels -------------------- */

@@ -3,7 +3,7 @@ const config = window.APP_CONFIG || {};
 
 const RPC_URL = config.rpcUrl || "http://127.0.0.1:8545";
 const CONTRACT_ADDRESS = config.simpleLotTradeAddress || "";
-const TETC_ADDRESS = config.tetcAddress || "";
+const WETC_ADDRESS = config.wetcAddress || "";
 const TKN10K_ADDRESS = config.tkn10kAddress || "";
 const MAX_LEVELS_DEFAULT = config.maxLevels || 25;
 const MAX_ORDERS_DEFAULT = config.maxOrders || 50;
@@ -15,7 +15,7 @@ const ABI = [
   "function getSellOrders(uint256) view returns (tuple(uint256 id,address owner,int256 tick,uint256 price,uint256 lotsRemaining,uint256 valueRemaining)[] out,uint256 n)",
   "function getOracle() view returns (int256 bestBuyTick,int256 bestSellTick,int256 lastTradeTick,uint256 lastTradeBlock,uint256 lastTradePrice)",
   "function getTopOfBook() view returns (int256 bestBuyTick,uint256 buyLots,uint256 buyOrders,int256 bestSellTick,uint256 sellLots,uint256 sellOrders)",
-  "function getEscrowTotals() view returns (uint256 buyTETC,uint256 sellTKN10K)",
+  "function getEscrowTotals() view returns (uint256 buyWETC,uint256 sellTKN10K)",
   "function priceAtTick(int256 tick) view returns (uint256)",
   "function cancel(uint64 id)",
   "function placeBuy(int256 tick,uint256 lots) returns (uint64)",
@@ -66,7 +66,7 @@ const el = {
   previewValue: document.getElementById("preview-value"),
   previewBtn: document.getElementById("preview-btn"),
   placeBtn: document.getElementById("place-btn"),
-  addTetc: document.getElementById("add-tetc"),
+  addWetc: document.getElementById("add-wetc"),
   addTkn10k: document.getElementById("add-tkn10k"),
   ticketStatus: document.getElementById("ticket-status")
 };
@@ -78,7 +78,7 @@ const state = {
   walletAddress: null,
   readContract: null,
   writeContract: null,
-  tetc: null,
+  wetc: null,
   tkn10k: null,
   side: "buy",
   demoMode: false,
@@ -95,7 +95,7 @@ function toNumber(value) {
   return Number(value);
 }
 
-function formatTetc(value, digits = 4) {
+function formatWetc(value, digits = 4) {
   if (value === null || value === undefined) return "--";
   const formatted = ethers.formatUnits(value, 18);
   const numeric = Number(formatted);
@@ -202,8 +202,8 @@ async function addTokenToWallet(address, fallbackSymbol, fallbackDecimals) {
   let decimals = fallbackDecimals;
   try {
     const token =
-      address.toLowerCase() === TETC_ADDRESS.toLowerCase()
-        ? state.tetc
+      address.toLowerCase() === WETC_ADDRESS.toLowerCase()
+        ? state.wetc
         : address.toLowerCase() === TKN10K_ADDRESS.toLowerCase()
           ? state.tkn10k
           : new ethers.Contract(address, ERC20_ABI, state.readProvider);
@@ -235,7 +235,7 @@ async function addTokenToWallet(address, fallbackSymbol, fallbackDecimals) {
 
 async function copyAddresses() {
   const lines = [
-    `TETC=${TETC_ADDRESS || "-"}`,
+    `WETC=${WETC_ADDRESS || "-"}`,
     `TKN10K=${TKN10K_ADDRESS || "-"}`,
     `SaturnLotTrade=${CONTRACT_ADDRESS || "-"}`
   ];
@@ -256,7 +256,7 @@ async function initProvider() {
     state.walletProvider = new ethers.BrowserProvider(window.ethereum);
   }
   state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.readProvider);
-  if (TETC_ADDRESS) state.tetc = new ethers.Contract(TETC_ADDRESS, ERC20_ABI, state.readProvider);
+  if (WETC_ADDRESS) state.wetc = new ethers.Contract(WETC_ADDRESS, ERC20_ABI, state.readProvider);
   if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.readProvider);
   state.readSource = "rpc";
 }
@@ -264,7 +264,7 @@ async function initProvider() {
 function useWalletForReads() {
   if (!state.walletProvider) return false;
   state.readContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, state.walletProvider);
-  if (TETC_ADDRESS) state.tetc = new ethers.Contract(TETC_ADDRESS, ERC20_ABI, state.walletProvider);
+  if (WETC_ADDRESS) state.wetc = new ethers.Contract(WETC_ADDRESS, ERC20_ABI, state.walletProvider);
   if (TKN10K_ADDRESS) state.tkn10k = new ethers.Contract(TKN10K_ADDRESS, ERC20_ABI, state.walletProvider);
   state.readSource = "wallet";
   return true;
@@ -305,9 +305,9 @@ function updateSpread(bestBid, bestAsk) {
   const askTick = BigInt(bestAsk.tick);
   const spread = askPrice - bidPrice;
   const mid = (askPrice + bidPrice) / 2n;
-  el.spreadValue.textContent = `${formatTetc(spread)} TETC`;
+  el.spreadValue.textContent = `${formatWetc(spread)} WETC`;
   el.midTick.textContent = formatTick((askTick + bidTick) / 2n);
-  el.midPrice.textContent = `${formatTetc(mid)} TETC`;
+  el.midPrice.textContent = `${formatWetc(mid)} WETC`;
 }
 
 function renderBook(container, levels, side) {
@@ -319,9 +319,9 @@ function renderBook(container, levels, side) {
   container.innerHTML = levels
     .map((lvl, idx) => {
       const depth = Math.round((toNumber(lvl.totalLots) / maxLots) * 100);
-      const price = formatTetc(lvl.price);
+      const price = formatWetc(lvl.price);
       const lots = formatLots(lvl.totalLots);
-      const total = formatTetc(lvl.totalValue);
+      const total = formatWetc(lvl.totalValue);
       return `
         <div class="book-row ${side}${idx === 0 ? " best" : ""}">
           <div class="bar" style="width:${depth}%;${side === "buy" ? "right:0;" : "left:0;"}"></div>
@@ -372,7 +372,7 @@ function renderOrders(buyOrders, sellOrders) {
         <div class="table-row orders">
           <span class="tag ${row.side}">${row.side.toUpperCase()}</span>
           <span>#${row.id}</span>
-          <span>${formatTick(row.tick)} @ ${formatTetc(row.price)}</span>
+          <span>${formatTick(row.tick)} @ ${formatWetc(row.price)}</span>
           <span>${formatLots(row.lots)} lots</span>
           ${action}
         </div>
@@ -391,7 +391,7 @@ function renderTape() {
           (trade) => `
         <div class="table-row">
           <span>${trade.side.toUpperCase()}</span>
-          <span>${formatTick(trade.tick)} @ ${formatTetc(trade.price)}</span>
+          <span>${formatTick(trade.tick)} @ ${formatWetc(trade.price)}</span>
           <span>${formatLots(trade.lots)} lots</span>
         </div>
       `
@@ -506,13 +506,13 @@ async function refresh() {
     updateChart(buyLevels, sellLevels);
 
     const [bestBuyTick, bestSellTick, lastTradeTick, lastTradeBlock, lastTradePrice] = oracle;
-    el.bestBid.textContent = bestBuyTick === NONE ? "--" : `${formatTick(bestBuyTick)} @ ${formatTetc(buyLevels[0]?.price || 0n)}`;
-    el.bestAsk.textContent = bestSellTick === NONE ? "--" : `${formatTick(bestSellTick)} @ ${formatTetc(sellLevels[0]?.price || 0n)}`;
-    el.lastTrade.textContent = `${formatTick(lastTradeTick)} @ ${formatTetc(lastTradePrice)}`;
+    el.bestBid.textContent = bestBuyTick === NONE ? "--" : `${formatTick(bestBuyTick)} @ ${formatWetc(buyLevels[0]?.price || 0n)}`;
+    el.bestAsk.textContent = bestSellTick === NONE ? "--" : `${formatTick(bestSellTick)} @ ${formatWetc(sellLevels[0]?.price || 0n)}`;
+    el.lastTrade.textContent = `${formatTick(lastTradeTick)} @ ${formatWetc(lastTradePrice)}`;
     el.lastBlock.textContent = lastTradeBlock.toString();
 
-    const [buyTETC, sellTKN10K] = escrow;
-    el.escrowTotals.textContent = `${formatTetc(buyTETC)} TETC / ${formatLots(sellTKN10K)} lots`;
+    const [buyWETC, sellTKN10K] = escrow;
+    el.escrowTotals.textContent = `${formatWetc(buyWETC)} WETC / ${formatLots(sellTKN10K)} lots`;
     const totalLots = [...buyLevels, ...sellLevels].reduce(
       (acc, lvl) => acc + BigInt(lvl.totalLots),
       0n
@@ -557,8 +557,8 @@ async function previewOrder() {
   try {
     const price = await state.readContract.priceAtTick(tick);
     const total = price * BigInt(lots);
-    el.previewPrice.textContent = `${formatTetc(price)} TETC`;
-    el.previewValue.textContent = `${formatTetc(total)} TETC`;
+    el.previewPrice.textContent = `${formatWetc(price)} WETC`;
+    el.previewValue.textContent = `${formatWetc(total)} WETC`;
   } catch (err) {
     setTicketStatus(`Preview error: ${err.message || err}`);
   }
@@ -640,7 +640,7 @@ async function seedOrders() {
     setTicketStatus("Connect a wallet to seed orders.");
     return;
   }
-  if (!state.tetc || !state.tkn10k) {
+  if (!state.wetc || !state.tkn10k) {
     setTicketStatus("Token addresses missing for seeding.");
     return;
   }
@@ -671,23 +671,23 @@ async function seedOrders() {
     ];
 
     const owner = await state.signer.getAddress();
-    const tetc = state.tetc.connect(state.signer);
+    const wetc = state.wetc.connect(state.signer);
     const tkn10k = state.tkn10k.connect(state.signer);
 
-    let neededTetc = 0n;
+    let neededWetc = 0n;
     for (const order of buySeeds) {
       const price = await state.readContract.priceAtTick(order.tick);
-      neededTetc += price * BigInt(order.lots);
+      neededWetc += price * BigInt(order.lots);
     }
     const neededTkn = sellSeeds.reduce((acc, order) => acc + BigInt(order.lots), 0n);
 
-    const [tetcAllowance, tknAllowance] = await Promise.all([
-      tetc.allowance(owner, CONTRACT_ADDRESS),
+    const [wetcAllowance, tknAllowance] = await Promise.all([
+      wetc.allowance(owner, CONTRACT_ADDRESS),
       tkn10k.allowance(owner, CONTRACT_ADDRESS)
     ]);
 
-    if (tetcAllowance < neededTetc) {
-      const tx = await tetc.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
+    if (wetcAllowance < neededWetc) {
+      const tx = await wetc.approve(CONTRACT_ADDRESS, ethers.MaxUint256);
       await tx.wait();
     }
     if (tknAllowance < neededTkn) {
@@ -717,8 +717,8 @@ function bindEvents() {
   if (el.copyBtn) {
     el.copyBtn.addEventListener("click", copyAddresses);
   }
-  if (el.addTetc) {
-    el.addTetc.addEventListener("click", () => addTokenToWallet(TETC_ADDRESS, "TETC", 18));
+  if (el.addWetc) {
+    el.addWetc.addEventListener("click", () => addTokenToWallet(WETC_ADDRESS, "WETC", 18));
   }
   if (el.addTkn10k) {
     el.addTkn10k.addEventListener("click", () => addTokenToWallet(TKN10K_ADDRESS, "TKN10K", 0));
