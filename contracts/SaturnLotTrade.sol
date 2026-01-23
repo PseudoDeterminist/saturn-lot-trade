@@ -19,8 +19,8 @@ contract SaturnLotTrade {
     int32 private constant MAX_TICK = 1855; // 9950 WETC per lot; 0.995 WETC per STRN
     uint32 private constant MAX_LOTS = 100000;
 
-    int32 private constant NONE_TICK = type(int32).min;
-    int256 private constant NONE = int256(NONE_TICK);
+    int32 private constant NONE32 = type(int32).min;
+    int256 private constant NONE256 = int256(NONE32);
 
     IERC20 public immutable WETC;    // quote token (18 decimals)
     IERC20 public immutable STRN10K;  // base token (0 decimals, integer lots)
@@ -45,15 +45,6 @@ contract SaturnLotTrade {
     uint256 public bookEscrowSTRN10K;   // total STRN10K Escrowed in sell orders
     uint256 public bookAskSTRN10K;      // total STRN10K asked in buy orders
     uint256 public bookAskWETC;        // total WETC asked in sell orders
-
-    // Reentrancy guard (token transfers)
-    uint8 private _lock = 1;
-    modifier nonReentrant() {
-        require(_lock == 1, "reentrancy");
-        _lock = 2;
-        _;
-        _lock = 1;
-    }
 
     /* -------------------- Events -------------------- */
 
@@ -189,8 +180,8 @@ contract SaturnLotTrade {
             WETC = IERC20(wetcToken);
             STRN10K = IERC20(strn10kToken);
         }
-        bestBuyTick = NONE;
-        bestSellTick = NONE;
+        bestBuyTick = NONE256;
+        bestSellTick = NONE256;
     }
 
     /* -------------------- Price -------------------- */
@@ -321,10 +312,10 @@ contract SaturnLotTrade {
 
     /* -------------------- Maker Orders (escrow on placement) -------------------- */
 
-    function placeBuy(int256 tick, uint256 lots) public nonReentrant returns (uint64 id) {
+    function placeBuy(int256 tick, uint256 lots) public returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         int32 t = _toTick(tick);
-        require(bestSellTick == NONE || bestSellTick > int256(t), "crossing sell book -- consider takeBuyFOK");
+        require(bestSellTick == NONE256 || bestSellTick > int256(t), "crossing sell book -- consider takeBuyFOK");
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -353,10 +344,10 @@ contract SaturnLotTrade {
         return placeBuy(tick, lots);
     }
 
-    function placeSell(int256 tick, uint256 lots) public nonReentrant returns (uint64 id) {
+    function placeSell(int256 tick, uint256 lots) public returns (uint64 id) {
         require(lots > 0 && lots <= MAX_LOTS, "invalid lots");
         int32 t = _toTick(tick);
-        require(bestBuyTick == NONE || bestBuyTick < int256(t), "crossing buy book -- consider takeSellFOK");
+        require(bestBuyTick == NONE256 || bestBuyTick < int256(t), "crossing buy book -- consider takeSellFOK");
 
         uint64 seq = historySeq;
         bytes32 chain = historyHash;
@@ -385,7 +376,7 @@ contract SaturnLotTrade {
         return placeSell(tick, lots);
     }
 
-    function cancel(uint64 id) external nonReentrant {
+    function cancel(uint64 id) external {
         Order storage o = orders[id];
         require(o.owner == msg.sender, "not owner");
 
@@ -420,9 +411,9 @@ contract SaturnLotTrade {
 
     /* -------------------- Taker FOK -------------------- */
 
-    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) public nonReentrant {
+    function takeBuyFOK(int256 limitTick, uint256 lots, uint256 maxTetcIn) public {
         require(lots > 0, "You requested zero lots");
-        require(bestSellTick != NONE, "There are no sell orders on book");
+        require(bestSellTick != NONE256, "There are no sell orders on book");
         require(lots <= bookEscrowSTRN10K, "insufficient escrowed STRN10K on book");
 
         WETC.safeTransferFrom(msg.sender, address(this), maxTetcIn); // escrow maxTetcIn. reverts on insufficient balance/allowance
@@ -513,7 +504,7 @@ contract SaturnLotTrade {
                 int32 nxt = lvl.next;
                 _removeTick(false, int32(t));
                 if (remain == 0) break;
-                if (nxt == NONE_TICK) break;
+                if (nxt == NONE32) break;
                 t = int256(nxt);
             } else {
                 if (head != lvl.head) {
@@ -546,9 +537,9 @@ contract SaturnLotTrade {
         takeBuyFOK(limitTick, lots, maxTetcIn);
     }
 
-    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) public nonReentrant {
+    function takeSellFOK(int256 limitTick, uint256 lots, uint256 minTetcOut) public {
         require(lots > 0, "You requested zero lots");
-        require(bestBuyTick != NONE, "There are no buy orders on book");
+        require(bestBuyTick != NONE256, "There are no buy orders on book");
         require(lots <= bookAskSTRN10K, "insufficient asked STRN10K on book");
         require(minTetcOut <= bookEscrowWETC, "insufficient escrowed WETC on book");
 
@@ -637,7 +628,7 @@ contract SaturnLotTrade {
                 int32 nxt = lvl.next;
                 _removeTick(true, int32(t));
                 if (remain == 0) break;
-                if (nxt == NONE_TICK) break;
+                if (nxt == NONE32) break;
                 t = int256(nxt);
             } else {
                 if (head != lvl.head) {
@@ -700,11 +691,11 @@ contract SaturnLotTrade {
     function _insertTick(bool isBuy, int32 tick, uint96 price) internal {
         TickLevel storage lvl = isBuy ? buyLevels[tick] : sellLevels[tick];
         lvl.price = price;
-        lvl.prev = NONE_TICK;
-        lvl.next = NONE_TICK;
+        lvl.prev = NONE32;
+        lvl.next = NONE32;
 
         if (isBuy) {
-            if (bestBuyTick == NONE) {
+            if (bestBuyTick == NONE256) {
                 bestBuyTick = int256(tick);
                 return;
             }
@@ -717,17 +708,17 @@ contract SaturnLotTrade {
             }
             while (true) {
                 int32 nxt = buyLevels[cur].next;
-                if (nxt == NONE_TICK || tick > nxt) {
+                if (nxt == NONE32 || tick > nxt) {
                     lvl.prev = int32(cur);
                     lvl.next = nxt;
                     buyLevels[cur].next = tick;
-                    if (nxt != NONE_TICK) buyLevels[nxt].prev = tick;
+                    if (nxt != NONE32) buyLevels[nxt].prev = tick;
                     return;
                 }
                 cur = nxt;
             }
         } else {
-            if (bestSellTick == NONE) {
+            if (bestSellTick == NONE256) {
                 bestSellTick = int256(tick);
                 return;
             }
@@ -740,11 +731,11 @@ contract SaturnLotTrade {
             }
             while (true) {
                 int32 nxt = sellLevels[cur].next;
-                if (nxt == NONE_TICK || tick < nxt) {
+                if (nxt == NONE32 || tick < nxt) {
                     lvl.prev = int32(cur);
                     lvl.next = nxt;
                     sellLevels[cur].next = tick;
-                    if (nxt != NONE_TICK) sellLevels[nxt].prev = tick;
+                    if (nxt != NONE32) sellLevels[nxt].prev = tick;
                     return;
                 }
                 cur = nxt;
@@ -776,14 +767,14 @@ contract SaturnLotTrade {
         int32 n = lvl.next;
 
         if (isBuy) {
-            if (p == NONE_TICK) bestBuyTick = int256(n);
+            if (p == NONE32) bestBuyTick = int256(n);
             else buyLevels[p].next = n;
-            if (n != NONE_TICK) buyLevels[n].prev = p;
+            if (n != NONE32) buyLevels[n].prev = p;
             delete buyLevels[tick];
         } else {
-            if (p == NONE_TICK) bestSellTick = int256(n);
+            if (p == NONE32) bestSellTick = int256(n);
             else sellLevels[p].next = n;
-            if (n != NONE_TICK) sellLevels[n].prev = p;
+            if (n != NONE32) sellLevels[n].prev = p;
             delete sellLevels[tick];
         }
     }
@@ -818,9 +809,9 @@ contract SaturnLotTrade {
         if (maxLevels == 0) return (new BookLevel[](0), 0);
 
         if (isBuy) {
-            if (bestBuyTick == NONE) return (new BookLevel[](0), 0);
+            if (bestBuyTick == NONE256) return (new BookLevel[](0), 0);
         } else {
-            if (bestSellTick == NONE) return (new BookLevel[](0), 0);
+            if (bestSellTick == NONE256) return (new BookLevel[](0), 0);
         }
 
         out = new BookLevel[](maxLevels);
@@ -828,14 +819,14 @@ contract SaturnLotTrade {
 
         if (isBuy) {
             int256 t = bestBuyTick;
-            while (t != NONE && n < maxLevels) {
+            while (t != NONE256 && n < maxLevels) {
                 TickLevel storage lvl = buyLevels[t];
                 if (lvl.totalLots > 0) out[n++] = BookLevel(t, lvl.price,lvl.totalLots, lvl.totalValue, lvl.orderCount);
                 t = lvl.next;
             }
         } else {
             int256 t = bestSellTick;
-            while (t != NONE && n < maxLevels) {
+            while (t != NONE256 && n < maxLevels) {
                 TickLevel storage lvl = sellLevels[t];
                 if (lvl.totalLots > 0) out[n++] = BookLevel(t, lvl.price, lvl.totalLots, lvl.totalValue, lvl.orderCount);
                 t = lvl.next;
@@ -851,12 +842,12 @@ contract SaturnLotTrade {
         if (maxOrders == 0) return (new BookOrder[](0), 0);
 
         int256 t = isBuy ? bestBuyTick : bestSellTick;
-        if (t == NONE) return (new BookOrder[](0), 0);
+        if (t == NONE256) return (new BookOrder[](0), 0);
 
         out = new BookOrder[](maxOrders);
         n = 0;
 
-        while (t != NONE && n < maxOrders) {
+        while (t != NONE256 && n < maxOrders) {
             TickLevel storage lvl = isBuy ? buyLevels[t] : sellLevels[t];
             uint64 id = lvl.head;
             uint256 price = lvl.price;
@@ -882,13 +873,13 @@ contract SaturnLotTrade {
         uint256 sellLots;
         uint256 sellOrders;
 
-        if (bestBuyTick != NONE) {
+        if (bestBuyTick != NONE256) {
             TickLevel storage b = buyLevels[bestBuyTick];
             buyLots = b.totalLots;
             buyOrders = b.orderCount;
         }
 
-        if (bestSellTick != NONE) {
+        if (bestSellTick != NONE256) {
             TickLevel storage s = sellLevels[bestSellTick];
             sellLots = s.totalLots;
             sellOrders = s.orderCount;

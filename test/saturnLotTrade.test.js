@@ -141,28 +141,6 @@ async function deployFixture() {
   return { deployer, alice, bob, carol, tetc, tkn, lotrade };
 }
 
-async function deployReentrantFixture() {
-  const [deployer, alice] = await ethers.getSigners();
-  const ReentrantERC20 = await ethers.getContractFactory("ReentrantERC20");
-  const TestERC20 = await ethers.getContractFactory("TestERC20");
-  const tetc = await ReentrantERC20.deploy(
-    "TETC",
-    "TETC",
-    18,
-    ethers.parseUnits("1000000", 18)
-  );
-  const tkn = await TestERC20.deploy("TKN10K", "TKN10K", 0, 1000000n);
-  const SaturnLotTrade = await ethers.getContractFactory("SaturnLotTrade");
-  const lotrade = await SaturnLotTrade.deploy(
-    await tetc.getAddress(),
-    await tkn.getAddress()
-  );
-
-  await tetc.transfer(alice.address, ethers.parseUnits("1000", 18));
-  await tkn.transfer(alice.address, 1000n);
-
-  return { deployer, alice, tetc, tkn, lotrade };
-}
 
 describe("SaturnLotTrade", function () {
   it("reverts for out-of-range ticks and is monotonic at bounds", async () => {
@@ -678,21 +656,6 @@ describe("SaturnLotTrade", function () {
     expect(lastBlock).to.be.greaterThan(0n);
   });
 
-  it("blocks reentrancy from token callbacks", async () => {
-    const { lotrade, tetc, alice } = await loadFixture(deployReentrantFixture);
-    const tick = 0;
-    const lots = 1n;
-    const price = await lotrade.priceAtTick(tick);
-    const cost = price * lots;
-
-    const data = lotrade.interface.encodeFunctionData("placeBuy(int256,uint256)", [tick, lots]);
-    await tetc.setReentry(await lotrade.getAddress(), data, false, true);
-
-    await tetc.connect(alice).approve(lotrade, cost);
-    await expect(lotrade.connect(alice)["placeBuy(int256,uint256)"](tick, lots)).to.be.revertedWith(
-      "reentrancy"
-    );
-  });
 });
 
 describe("Gas metrics", function () {
