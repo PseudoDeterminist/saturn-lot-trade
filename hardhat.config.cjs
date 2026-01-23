@@ -29,6 +29,7 @@ module.exports = {
   etherscan: {
     apiKey: {
       mordor: process.env.MORDOR_BLOCKSCOUT_API_KEY || "",
+      etc: process.env.MAINNET_BLOCKSCOUT_API_KEY || "",
     },
     customChains: [
       {
@@ -37,6 +38,14 @@ module.exports = {
         urls: {
           apiURL: "https://etc-mordor.blockscout.com/api",
           browserURL: "https://etc-mordor.blockscout.com",
+        },
+      },
+      {
+        network: "etc",
+        chainId: 61,
+        urls: {
+          apiURL: "https://etc.blockscout.com/api",
+          browserURL: "https://etc.blockscout.com",
         },
       },
     ],
@@ -54,6 +63,11 @@ module.exports = {
       url: process.env.MORDOR_RPC_URL || "",
       accounts: process.env.MORDOR_DEPLOYER_PK ? [process.env.MORDOR_DEPLOYER_PK] : [],
       chainId: 63,
+    },
+    etc: {
+      url: process.env.MAINNET_RPC_URL || process.env.ETC_RPC_URL || "",
+      accounts: process.env.MAINNET_DEPLOYER_PK ? [process.env.MAINNET_DEPLOYER_PK] : [],
+      chainId: 61,
     },
   },
 };
