@@ -1,3 +1,4 @@
+require("dotenv").config();
 require("@nomicfoundation/hardhat-toolbox");
 const { subtask } = require("hardhat/config");
 const {
@@ -33,6 +34,11 @@ module.exports = {
     localhost: {
       url: "http://127.0.0.1:8545",
       accounts: "remote",
+    },
+    mordor: {
+      url: process.env.MORDOR_RPC_URL || "",
+      accounts: process.env.MORDOR_DEPLOYER_PK ? [process.env.MORDOR_DEPLOYER_PK] : [],
+      chainId: 63,
     },
   },
 };
