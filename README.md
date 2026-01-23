@@ -8,6 +8,13 @@ STRN10K represents a 10,000-token Lot, meant to be a wrapper for the underlying 
 
 WETC is the wrapped ETC quote asset used on ETC mainnet. In tests, a mock WETC is deployed.
 
+## UI network toggle
+
+The UI supports a query parameter to switch between local Hardhat and ETC mainnet: 
+
+- Hardhat (default): open `ui/index.html`
+- ETC mainnet: open `ui/index.html?net=etc` (uses your local ETC node at `http://127.0.0.1:8545`)
+
 ## Deploy checklist (ETC mainnet)
 
 - Confirm token addresses in `.env`: `MAINNET_WETC_ADDRESS`, `MAINNET_STRN10K_ADDRESS`.
