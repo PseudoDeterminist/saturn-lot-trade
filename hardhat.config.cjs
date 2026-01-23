@@ -26,6 +26,21 @@ module.exports = {
       viaIR: true,
     },
   },
+  etherscan: {
+    apiKey: {
+      mordor: process.env.MORDOR_BLOCKSCOUT_API_KEY || "",
+    },
+    customChains: [
+      {
+        network: "mordor",
+        chainId: 63,
+        urls: {
+          apiURL: "https://etc-mordor.blockscout.com/api",
+          browserURL: "https://etc-mordor.blockscout.com",
+        },
+      },
+    ],
+  },
   networks: {
     local: {
       url: "http://127.0.0.1:8545",
